@@ -1,0 +1,139 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Display vMix - Letras</title>
+    <style>
+      :root {
+        color-scheme: only light;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      body {
+        display: grid;
+        place-items: end center;
+        padding: 2.2vh 2.5vw;
+        box-sizing: border-box;
+        font-family: Arial, sans-serif;
+      }
+
+      #stage {
+        position: relative;
+        width: fit-content;
+        max-width: min(92vw, 1840px);
+        padding: 1.4vh 1.4vw;
+        box-sizing: border-box;
+        text-align: center;
+      }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+        border-radius: 18px;
+        pointer-events: none;
+        z-index: 0;
+        opacity: 0;
+        transition: opacity 120ms linear;
+      }
+
+      #overlay.visible {
+        opacity: 1;
+      }
+
+      #lyric {
+        position: relative;
+        z-index: 1;
+        display: inline-block;
+        width: fit-content;
+        max-width: min(88vw, 1700px);
+        color: #ffffff;
+        font-size: 72px;
+        text-align: center;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        line-height: 1.15;
+        font-weight: 500;
+        -webkit-font-smoothing: antialiased;
+        opacity: 1;
+        padding: 0.4vh 0.6vw;
+        box-sizing: border-box;
+      }
+
+      #lyric.fade {
+        transition: opacity 120ms linear;
+      }
+
+      #lyric.hidden {
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="overlay"></div>
+      <div id="lyric"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const lyricNode = document.getElementById("lyric");
+      const overlayNode = document.getElementById("overlay");
+      const params = new URLSearchParams(window.location.search);
+      const channel = (params.get("channel") || "default").toLowerCase();
+
+      const socket = io({
+        transports: ["websocket"],
+        query: { channel }
+      });
+
+      const applyStyle = (style = {}) => {
+        lyricNode.style.color = style.color || "#ffffff";
+        lyricNode.style.fontSize = style.fontSize || "72px";
+        lyricNode.style.textAlign = style.textAlign || "center";
+        lyricNode.style.textShadow = style.textShadow || "none";
+        lyricNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        overlayNode.style.background = style.renderBackground || style.renderBackgroundColor || "transparent";
+      };
+
+      const applyText = (text = "") => {
+        lyricNode.textContent = text;
+        if (String(text).trim().length > 0) {
+          overlayNode.classList.add("visible");
+        } else {
+          overlayNode.classList.remove("visible");
+        }
+      };
+
+      const runFade = (enabled) => {
+        if (!enabled) {
+          lyricNode.classList.remove("fade", "hidden");
+          return;
+        }
+
+        lyricNode.classList.add("fade", "hidden");
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            lyricNode.classList.remove("hidden");
+          });
+        });
+      };
+
+      socket.on("lyrics:update", (payload) => {
+        applyText(payload?.texto || "");
+        applyStyle(payload?.estilo || {});
+        runFade(Boolean(payload?.estilo?.fade));
+      });
+    </script>
+  </body>
+</html>
