@@ -1,5 +1,6 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,9 +22,27 @@ import {
 const app = express();
 const server = http.createServer(app);
 
+const parsePanelOrigin = (value) => {
+  const raw = String(value || "*").trim();
+  if (!raw || raw === "*") {
+    return "*";
+  }
+
+  const origins = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) {
+    return "*";
+  }
+
+  return origins.length === 1 ? origins[0] : origins;
+};
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.PANEL_ORIGIN || "http://localhost:5173"
+    origin: parsePanelOrigin(process.env.PANEL_ORIGIN)
   },
   transports: ["websocket"]
 });
@@ -420,18 +439,48 @@ app.post("/holyrics/pull-now", async (_req, res) => {
 });
 
 const port = Number(process.env.PORT) || 3001;
+const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
+
+const resolveServerUrls = (listenHost, listenPort) => {
+  const normalizedHost = String(listenHost || "").trim().toLowerCase();
+  const onAllInterfaces = normalizedHost === "0.0.0.0" || normalizedHost === "::";
+  const urls = new Set();
+
+  if (onAllInterfaces) {
+    urls.add(`http://localhost:${listenPort}`);
+
+    const interfaces = os.networkInterfaces();
+    for (const addresses of Object.values(interfaces)) {
+      for (const address of addresses || []) {
+        if (address.family === "IPv4" && !address.internal) {
+          urls.add(`http://${address.address}:${listenPort}`);
+        }
+      }
+    }
+  } else {
+    urls.add(`http://${listenHost}:${listenPort}`);
+  }
+
+  return [...urls];
+};
+
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
-    console.error(`[server] Porta ${port} ja esta em uso. Encerre o processo antigo ou altere PORT no .env.`);
+    console.error(
+      `[server] ${host}:${port} ja esta em uso. Encerre o processo antigo ou altere HOST/PORT no .env.`
+    );
     return;
   }
 
   console.error("[server] Erro ao iniciar:", error);
 });
 
-server.listen(port, () => {
-  console.log(`[server] Rodando em http://localhost:${port}`);
-  console.log(`[server] Display default para vMix: http://localhost:${port}/display`);
-  console.log(`[server] Display musica para vMix: http://localhost:${port}/display/music`);
-  console.log(`[server] Display biblia para vMix: http://localhost:${port}/display/bible`);
+server.listen(port, host, () => {
+  const urls = resolveServerUrls(host, port);
+  for (const baseUrl of urls) {
+    console.log(`[server] Rodando em ${baseUrl}`);
+    console.log(`[server] Display default para vMix: ${baseUrl}/display`);
+    console.log(`[server] Display musica para vMix: ${baseUrl}/display/music`);
+    console.log(`[server] Display biblia para vMix: ${baseUrl}/display/bible`);
+  }
 });

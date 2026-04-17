@@ -7,7 +7,7 @@
     "control-panel"
   ],
   "scripts": {
-    "dev": "concurrently \"npm --workspace server run dev\" \"npm --workspace control-panel run dev\"",
+    "dev": "concurrently \"npm --workspace server run dev\" \"npm --workspace control-panel run dev --host\"",
     "dev:server": "npm --workspace server run dev",
     "dev:panel": "npm --workspace control-panel run dev",
     "build": "npm --workspace control-panel run build",
