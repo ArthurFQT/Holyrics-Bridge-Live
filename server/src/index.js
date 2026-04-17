@@ -85,7 +85,7 @@ const applyMusicLineBreak = (text, breakEveryLines) => {
   const lines = String(text || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((line) => line.trimEnd())
+    .map((line) => line.trim())
     .filter((line) => line.trim().length > 0);
 
   if (lines.length === 0) {
@@ -93,20 +93,9 @@ const applyMusicLineBreak = (text, breakEveryLines) => {
   }
 
   const output = [];
-  let countInBlock = 0;
-
-  for (const line of lines) {
-    output.push(line);
-    countInBlock += 1;
-
-    if (countInBlock >= breakEveryLines) {
-      output.push("");
-      countInBlock = 0;
-    }
-  }
-
-  while (output.length > 0 && output[output.length - 1].trim().length === 0) {
-    output.pop();
+  for (let index = 0; index < lines.length; index += breakEveryLines) {
+    const chunk = lines.slice(index, index + breakEveryLines);
+    output.push(chunk.join(" "));
   }
 
   return output.join("\n");
