@@ -9,6 +9,15 @@ const CHANNELS = [
   { id: "bible", label: "Biblia" }
 ];
 
+const BIBLE_META_POSITIONS = [
+  { value: "top-left", label: "Topo esquerdo" },
+  { value: "top-center", label: "Topo centro" },
+  { value: "top-right", label: "Topo direito" },
+  { value: "bottom-left", label: "Rodape esquerdo" },
+  { value: "bottom-center", label: "Rodape centro" },
+  { value: "bottom-right", label: "Rodape direito" }
+];
+
 const initialStyle = {
   color: "#ffffff",
   fontSize: 72,
@@ -23,6 +32,12 @@ const initialStyle = {
   gradientOpacity: 78,
   gradientSpread: 68,
   gradientDirection: "to top right",
+  showBibleVersion: true,
+  showBibleReference: true,
+  bibleVersionPosition: "top-right",
+  bibleReferencePosition: "bottom-right",
+  bibleVersionFontSize: 32,
+  bibleReferenceFontSize: 40,
   fade: false
 };
 
@@ -49,7 +64,11 @@ const createInitialDrafts = () =>
   CHANNELS.reduce((acc, channel) => {
     acc[channel.id] = {
       texto: "",
-      style: { ...initialStyle }
+      style: { ...initialStyle },
+      bibleInfo: {
+        version: "",
+        reference: ""
+      }
     };
     return acc;
   }, {});
@@ -63,6 +82,12 @@ const parseServerStyle = (style = {}) => {
     ...style,
     backgroundMode: parsedBackgroundMode,
     fontSize: Number(String(style.fontSize || initialStyle.fontSize).replace("px", "")) || initialStyle.fontSize,
+    bibleVersionFontSize:
+      Number(String(style.bibleVersionFontSize || initialStyle.bibleVersionFontSize).replace("px", "")) ||
+      initialStyle.bibleVersionFontSize,
+    bibleReferenceFontSize:
+      Number(String(style.bibleReferenceFontSize || initialStyle.bibleReferenceFontSize).replace("px", "")) ||
+      initialStyle.bibleReferenceFontSize,
     shadowEnabled: style.shadowEnabled ?? style.textShadow !== "none"
   };
 };
@@ -81,8 +106,37 @@ const buildStylePayload = (style) => ({
   gradientOpacity: Number(style.gradientOpacity),
   gradientSpread: Number(style.gradientSpread),
   gradientDirection: style.gradientDirection,
+  showBibleVersion: Boolean(style.showBibleVersion),
+  showBibleReference: Boolean(style.showBibleReference),
+  bibleVersionPosition: style.bibleVersionPosition,
+  bibleReferencePosition: style.bibleReferencePosition,
+  bibleVersionFontSize: Number(style.bibleVersionFontSize),
+  bibleReferenceFontSize: Number(style.bibleReferenceFontSize),
   fade: style.fade
 });
+
+const parseBibleInfo = (info = {}) => ({
+  version: typeof info?.version === "string" ? info.version.trim() : "",
+  reference: typeof info?.reference === "string" ? info.reference.trim() : ""
+});
+
+const toPreviewMetaClass = (position = "top-right") => {
+  const normalized = String(position || "").toLowerCase();
+  if (
+    [
+      "top-left",
+      "top-center",
+      "top-right",
+      "bottom-left",
+      "bottom-center",
+      "bottom-right"
+    ].includes(normalized)
+  ) {
+    return `preview-${normalized}`;
+  }
+
+  return "preview-top-right";
+};
 
 const buildPreviewBackground = (style) => {
   if (style.backgroundMode === "solid") {
@@ -113,8 +167,58 @@ function App() {
   });
   const confirmResolverRef = useRef(null);
 
-  const currentDraft = channelDrafts[selectedChannel] || { texto: "", style: initialStyle };
+  const currentDraft = channelDrafts[selectedChannel] || {
+    texto: "",
+    style: initialStyle,
+    bibleInfo: { version: "", reference: "" }
+  };
   const currentStyle = currentDraft.style;
+  const isBottomPosition = (position) => String(position || "").toLowerCase().startsWith("bottom");
+  const isTopPosition = (position) => String(position || "").toLowerCase().startsWith("top");
+  const showPreviewVersion = selectedChannel === "bible" && currentStyle.showBibleVersion;
+  const showPreviewReference = selectedChannel === "bible" && currentStyle.showBibleReference;
+  const samePreviewMetaPosition =
+    showPreviewVersion &&
+    showPreviewReference &&
+    currentStyle.bibleVersionPosition === currentStyle.bibleReferencePosition;
+
+  const previewVersionOffsetPx =
+    samePreviewMetaPosition && isBottomPosition(currentStyle.bibleVersionPosition)
+      ? Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.2) + 10
+      : 0;
+
+  const previewReferenceOffsetPx =
+    samePreviewMetaPosition && isTopPosition(currentStyle.bibleReferencePosition)
+      ? Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.2) + 10
+      : 0;
+
+  let previewTopPaddingPx = 20;
+  if (showPreviewVersion && isTopPosition(currentStyle.bibleVersionPosition)) {
+    previewTopPaddingPx = Math.max(
+      previewTopPaddingPx,
+      Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.35) + 26
+    );
+  }
+  if (showPreviewReference && isTopPosition(currentStyle.bibleReferencePosition)) {
+    previewTopPaddingPx = Math.max(
+      previewTopPaddingPx,
+      Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.35) + 26 + previewReferenceOffsetPx
+    );
+  }
+
+  let previewBottomPaddingPx = 20;
+  if (showPreviewVersion && isBottomPosition(currentStyle.bibleVersionPosition)) {
+    previewBottomPaddingPx = Math.max(
+      previewBottomPaddingPx,
+      Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.35) + 26 + previewVersionOffsetPx
+    );
+  }
+  if (showPreviewReference && isBottomPosition(currentStyle.bibleReferencePosition)) {
+    previewBottomPaddingPx = Math.max(
+      previewBottomPaddingPx,
+      Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.35) + 26
+    );
+  }
 
   const closeConfirmDialog = useCallback((result) => {
     if (confirmResolverRef.current) {
@@ -152,7 +256,11 @@ function App() {
 
   const updateDraft = useCallback((channel, updater) => {
     setChannelDrafts((prev) => {
-      const current = prev[channel] || { texto: "", style: { ...initialStyle } };
+      const current = prev[channel] || {
+        texto: "",
+        style: { ...initialStyle },
+        bibleInfo: { version: "", reference: "" }
+      };
       const nextPartial = typeof updater === "function" ? updater(current) : updater;
 
       return {
@@ -163,6 +271,10 @@ function App() {
           style: {
             ...current.style,
             ...(nextPartial?.style || {})
+          },
+          bibleInfo: {
+            ...current.bibleInfo,
+            ...(nextPartial?.bibleInfo || {})
           }
         }
       };
@@ -176,7 +288,8 @@ function App() {
 
       updateDraft(channel, (current) => ({
         texto: typeof data?.texto === "string" ? data.texto : current.texto,
-        style: data?.estilo ? parseServerStyle(data.estilo) : current.style
+        style: data?.estilo ? parseServerStyle(data.estilo) : current.style,
+        bibleInfo: parseBibleInfo(data?.meta?.bibleInfo)
       }));
     },
     [updateDraft]
@@ -198,7 +311,8 @@ function App() {
     const onUpdate = (payload) => {
       updateDraft(selectedChannel, (current) => ({
         texto: typeof payload?.texto === "string" ? payload.texto : current.texto,
-        style: payload?.estilo ? parseServerStyle(payload.estilo) : current.style
+        style: payload?.estilo ? parseServerStyle(payload.estilo) : current.style,
+        bibleInfo: parseBibleInfo(payload?.meta?.bibleInfo)
       }));
     };
 
@@ -716,6 +830,82 @@ function App() {
             Fade suave na troca de letra
           </label>
 
+          {selectedChannel === "bible" && (
+            <>
+              <label className="field inline">
+                <input
+                  type="checkbox"
+                  checked={currentStyle.showBibleVersion}
+                  onChange={(event) => handleStyleChange("showBibleVersion", event.target.checked)}
+                />
+                Mostrar versao da Biblia
+              </label>
+
+              <label className="field">
+                Posicao da versao
+                <select
+                  value={currentStyle.bibleVersionPosition}
+                  disabled={!currentStyle.showBibleVersion}
+                  onChange={(event) => handleStyleChange("bibleVersionPosition", event.target.value)}
+                >
+                  {BIBLE_META_POSITIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                Tamanho da versao (px)
+                <input
+                  type="number"
+                  min={14}
+                  max={120}
+                  value={currentStyle.bibleVersionFontSize}
+                  disabled={!currentStyle.showBibleVersion}
+                  onChange={(event) => handleStyleChange("bibleVersionFontSize", event.target.value)}
+                />
+              </label>
+
+              <label className="field inline">
+                <input
+                  type="checkbox"
+                  checked={currentStyle.showBibleReference}
+                  onChange={(event) => handleStyleChange("showBibleReference", event.target.checked)}
+                />
+                Mostrar livro/capitulo/versiculo
+              </label>
+
+              <label className="field">
+                Posicao da referencia
+                <select
+                  value={currentStyle.bibleReferencePosition}
+                  disabled={!currentStyle.showBibleReference}
+                  onChange={(event) => handleStyleChange("bibleReferencePosition", event.target.value)}
+                >
+                  {BIBLE_META_POSITIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                Tamanho da referencia (px)
+                <input
+                  type="number"
+                  min={16}
+                  max={140}
+                  value={currentStyle.bibleReferenceFontSize}
+                  disabled={!currentStyle.showBibleReference}
+                  onChange={(event) => handleStyleChange("bibleReferenceFontSize", event.target.value)}
+                />
+              </label>
+            </>
+          )}
+
           <div className="field field-full action-row">
             <button type="submit">Salvar no canal atual</button>
             <button type="button" className="ghost" onClick={handleSendStyleToAll}>
@@ -730,7 +920,14 @@ function App() {
           </div>
         </form>
 
-        <div className="preview-box" style={{ background: buildPreviewBackground(currentStyle) }}>
+        <div
+          className="preview-box"
+          style={{
+            background: buildPreviewBackground(currentStyle),
+            paddingTop: `${previewTopPaddingPx}px`,
+            paddingBottom: `${previewBottomPaddingPx}px`
+          }}
+        >
           <p
             style={{
               color: currentStyle.color,
@@ -743,6 +940,44 @@ function App() {
           >
             {currentDraft.texto || "Previa do canal selecionado"}
           </p>
+
+          {showPreviewVersion && (
+            <span
+              className={`preview-meta preview-version ${toPreviewMetaClass(currentStyle.bibleVersionPosition)}`}
+              style={{
+                color: currentStyle.color,
+                fontFamily: currentStyle.fontFamily,
+                fontSize: `${Number(currentStyle.bibleVersionFontSize) || 32}px`,
+                ...(isBottomPosition(currentStyle.bibleVersionPosition)
+                  ? { bottom: `${12 + previewVersionOffsetPx}px` }
+                  : {}),
+                textShadow: currentStyle.shadowEnabled
+                  ? `0 0 ${Math.round((Number(currentStyle.shadowIntensity) / 100) * 20)}px rgba(0,0,0,0.95)`
+                  : "none"
+              }}
+            >
+              {currentDraft.bibleInfo?.version || "A Bíblia Sagrada, Almeida Corrigida Fiel | acf"}
+            </span>
+          )}
+
+          {showPreviewReference && (
+            <span
+              className={`preview-meta preview-reference ${toPreviewMetaClass(currentStyle.bibleReferencePosition)}`}
+              style={{
+                color: currentStyle.color,
+                fontFamily: currentStyle.fontFamily,
+                fontSize: `${Number(currentStyle.bibleReferenceFontSize) || 40}px`,
+                ...(isTopPosition(currentStyle.bibleReferencePosition)
+                  ? { top: `${12 + previewReferenceOffsetPx}px` }
+                  : {}),
+                textShadow: currentStyle.shadowEnabled
+                  ? `0 0 ${Math.round((Number(currentStyle.shadowIntensity) / 100) * 20)}px rgba(0,0,0,0.95)`
+                  : "none"
+              }}
+            >
+              {currentDraft.bibleInfo?.reference || "Gênesis 17:1"}
+            </span>
+          )}
         </div>
       </section>
 

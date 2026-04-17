@@ -19,26 +19,30 @@
       }
 
       body {
-        display: grid;
-        place-items: end center;
-        padding: 2.2vh 2.5vw;
+        position: fixed;
+        inset: 0;
+        padding: 0;
         box-sizing: border-box;
         font-family: Arial, sans-serif;
       }
 
       #stage {
-        position: relative;
-        width: fit-content;
-        max-width: min(92vw, 1840px);
-        padding: 1.4vh 1.4vw;
+        --safe-bottom: 0px;
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 2.2vh 2.5vw calc(2.2vh + var(--safe-bottom));
         box-sizing: border-box;
-        text-align: center;
       }
 
       #overlay {
         position: absolute;
         inset: 0;
-        border-radius: 18px;
+        border-radius: 0;
         pointer-events: none;
         z-index: 0;
         opacity: 0;
@@ -52,9 +56,10 @@
       #lyric {
         position: relative;
         z-index: 1;
-        display: inline-block;
-        width: fit-content;
-        max-width: min(88vw, 1700px);
+        display: block;
+        width: 100%;
+        max-width: none;
+        max-height: calc(100vh - var(--safe-bottom) - 5vh);
         color: #ffffff;
         font-size: 72px;
         text-align: center;
@@ -65,8 +70,9 @@
         font-weight: 500;
         -webkit-font-smoothing: antialiased;
         opacity: 1;
-        padding: 0.4vh 0.6vw;
+        padding: 0;
         box-sizing: border-box;
+        overflow: hidden;
       }
 
       #lyric.fade {
@@ -76,6 +82,78 @@
       #lyric.hidden {
         opacity: 0;
       }
+
+      .bible-meta {
+        position: fixed;
+        z-index: 5;
+        max-width: min(82vw, 1450px);
+        padding: 0.26em 0.62em;
+        border-radius: 10px;
+        font-family: Arial, sans-serif;
+        font-size: clamp(20px, 2.2vw, 34px);
+        font-weight: 700;
+        letter-spacing: 0.015em;
+        color: #ffffff;
+        text-shadow: 0 2px 5px rgba(0, 0, 0, 0.74);
+        background: rgba(0, 0, 0, 0.5);
+        white-space: normal;
+        line-height: 1.15;
+        overflow: hidden;
+        text-overflow: clip;
+        pointer-events: none;
+        display: none;
+      }
+
+      .bible-meta.version {
+        font-weight: 700;
+        max-width: min(78vw, 1300px);
+      }
+
+      .bible-meta.reference {
+        font-weight: 700;
+      }
+
+      .bible-meta.show {
+        display: block;
+      }
+
+      .meta-top-left {
+        top: 2.2vh;
+        left: 2.5vw;
+        text-align: left;
+      }
+
+      .meta-top-center {
+        top: 2.2vh;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+      }
+
+      .meta-top-right {
+        top: 2.2vh;
+        right: 2.5vw;
+        text-align: right;
+      }
+
+      .meta-bottom-left {
+        bottom: 2.2vh;
+        left: 2.5vw;
+        text-align: left;
+      }
+
+      .meta-bottom-center {
+        bottom: 2.2vh;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+      }
+
+      .meta-bottom-right {
+        bottom: 2.2vh;
+        right: 2.5vw;
+        text-align: right;
+      }
     </style>
   </head>
   <body>
@@ -83,11 +161,16 @@
       <div id="overlay"></div>
       <div id="lyric"></div>
     </div>
+    <div id="bible-version" class="bible-meta version"></div>
+    <div id="bible-reference" class="bible-meta reference"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
+      const stageNode = document.getElementById("stage");
       const lyricNode = document.getElementById("lyric");
       const overlayNode = document.getElementById("overlay");
+      const bibleVersionNode = document.getElementById("bible-version");
+      const bibleReferenceNode = document.getElementById("bible-reference");
       const params = new URLSearchParams(window.location.search);
       const channel = (params.get("channel") || "default").toLowerCase();
 
@@ -102,7 +185,124 @@
         lyricNode.style.textAlign = style.textAlign || "center";
         lyricNode.style.textShadow = style.textShadow || "none";
         lyricNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        bibleVersionNode.style.color = style.color || "#ffffff";
+        bibleReferenceNode.style.color = style.color || "#ffffff";
+        bibleVersionNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        bibleReferenceNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        bibleVersionNode.style.textShadow = style.textShadow || "none";
+        bibleReferenceNode.style.textShadow = style.textShadow || "none";
+        bibleVersionNode.style.fontSize = `${Number(style.bibleVersionFontSize) || 32}px`;
+        bibleReferenceNode.style.fontSize = `${Number(style.bibleReferenceFontSize) || 40}px`;
         overlayNode.style.background = style.renderBackground || style.renderBackgroundColor || "transparent";
+      };
+
+      const META_POSITION_CLASSES = [
+        "meta-top-left",
+        "meta-top-center",
+        "meta-top-right",
+        "meta-bottom-left",
+        "meta-bottom-center",
+        "meta-bottom-right"
+      ];
+
+      const applyMetaPosition = (node, position = "top-right") => {
+        META_POSITION_CLASSES.forEach((className) => node.classList.remove(className));
+        node.classList.add(`meta-${position}`);
+      };
+
+      const isBottomMetaNode = (node) =>
+        META_POSITION_CLASSES.some(
+          (className) => className.startsWith("meta-bottom-") && node.classList.contains(className)
+        );
+
+      const getMetaPositionClass = (node) =>
+        META_POSITION_CLASSES.find((className) => node.classList.contains(className)) || "";
+
+      const updateMetaLayout = () => {
+        const allMetaNodes = [bibleVersionNode, bibleReferenceNode];
+        for (const node of allMetaNodes) {
+          node.style.removeProperty("bottom");
+        }
+
+        const bottomVisibleNodes = allMetaNodes.filter(
+          (node) => node.classList.contains("show") && isBottomMetaNode(node)
+        );
+
+        if (bottomVisibleNodes.length === 0) {
+          stageNode.style.setProperty("--safe-bottom", "0px");
+          return;
+        }
+
+        const groups = new Map();
+        for (const node of bottomVisibleNodes) {
+          const positionClass = getMetaPositionClass(node);
+          if (!groups.has(positionClass)) {
+            groups.set(positionClass, []);
+          }
+          groups.get(positionClass).push(node);
+        }
+
+        let safeBottomPx = 0;
+        for (const nodes of groups.values()) {
+          const ordered = [...nodes].sort((left, right) => {
+            if (left === bibleReferenceNode) return -1;
+            if (right === bibleReferenceNode) return 1;
+            return 0;
+          });
+
+          let offsetPx = 0;
+          for (const node of ordered) {
+            node.style.bottom = `calc(2.2vh + ${offsetPx}px)`;
+            const consumed = offsetPx + node.getBoundingClientRect().height;
+            safeBottomPx = Math.max(safeBottomPx, consumed + 14);
+            offsetPx += node.getBoundingClientRect().height + 8;
+          }
+        }
+
+        stageNode.style.setProperty("--safe-bottom", `${Math.ceil(safeBottomPx)}px`);
+      };
+
+      const hideBibleMeta = () => {
+        bibleVersionNode.classList.remove("show");
+        bibleReferenceNode.classList.remove("show");
+        bibleVersionNode.textContent = "";
+        bibleReferenceNode.textContent = "";
+        updateMetaLayout();
+      };
+
+      const applyBibleMeta = (payload = {}) => {
+        if (channel !== "bible") {
+          hideBibleMeta();
+          return;
+        }
+
+        const style = payload?.estilo || {};
+        const info = payload?.meta?.bibleInfo || {};
+        const version = String(info.version || "").trim();
+        const reference = String(info.reference || "").trim();
+
+        const showVersion = style.showBibleVersion !== false && version.length > 0;
+        const showReference = style.showBibleReference !== false && reference.length > 0;
+
+        if (showVersion) {
+          bibleVersionNode.textContent = version;
+          applyMetaPosition(bibleVersionNode, style.bibleVersionPosition || "top-right");
+          bibleVersionNode.classList.add("show");
+        } else {
+          bibleVersionNode.classList.remove("show");
+          bibleVersionNode.textContent = "";
+        }
+
+        if (showReference) {
+          bibleReferenceNode.textContent = reference;
+          applyMetaPosition(bibleReferenceNode, style.bibleReferencePosition || "bottom-right");
+          bibleReferenceNode.classList.add("show");
+        } else {
+          bibleReferenceNode.classList.remove("show");
+          bibleReferenceNode.textContent = "";
+        }
+
+        requestAnimationFrame(updateMetaLayout);
       };
 
       const applyText = (text = "") => {
@@ -129,10 +329,16 @@
         });
       };
 
+      window.addEventListener("resize", () => {
+        requestAnimationFrame(updateMetaLayout);
+      });
+
       socket.on("lyrics:update", (payload) => {
         applyText(payload?.texto || "");
         applyStyle(payload?.estilo || {});
+        applyBibleMeta(payload);
         runFade(Boolean(payload?.estilo?.fade));
+        requestAnimationFrame(updateMetaLayout);
       });
     </script>
   </body>

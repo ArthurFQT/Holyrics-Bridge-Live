@@ -8,7 +8,12 @@ import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
 
-import { startHolyricsPull } from "./holyricsClient.js";
+import {
+  extractBibleInfo,
+  normalizeBibleContent,
+  sanitizeHolyricsText,
+  startHolyricsPull
+} from "./holyricsClient.js";
 import {
   CHANNELS,
   createInitialChannelStates,
@@ -153,14 +158,23 @@ const emitState = (channel) => {
   io.to(roomFor(safeChannel)).emit("lyrics:update", toClientPayload(state, safeChannel));
 };
 
-const applyUpdate = ({ texto, estilo, source, channel }) => {
+const resolveBibleInfoForChannel = (channel, bibleInfo) => {
+  if (channel !== CHANNELS.BIBLE) {
+    return null;
+  }
+
+  return bibleInfo || undefined;
+};
+
+const applyUpdate = ({ texto, estilo, source, channel, bibleInfo }) => {
   const safeChannel = getSafeChannel(channel);
   const transformedText = transformTextByChannel(texto, safeChannel);
   const currentState = channelStates[safeChannel];
   const { changed, state } = mergeState(currentState, {
     texto: transformedText,
     estilo,
-    source
+    source,
+    bibleInfo: resolveBibleInfoForChannel(safeChannel, bibleInfo)
   });
   channelStates = {
     ...channelStates,
@@ -178,7 +192,7 @@ const applyUpdate = ({ texto, estilo, source, channel }) => {
   };
 };
 
-const mirrorToDefault = ({ texto, estilo, source, channel }) => {
+const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo }) => {
   if (channel === CHANNELS.DEFAULT) {
     return;
   }
@@ -187,19 +201,20 @@ const mirrorToDefault = ({ texto, estilo, source, channel }) => {
     texto,
     estilo,
     source: `${source}:default-mirror`,
-    channel: CHANNELS.DEFAULT
+    channel: CHANNELS.DEFAULT,
+    bibleInfo: channel === CHANNELS.BIBLE ? bibleInfo : null
   });
 };
 
-const applyUpdateMany = ({ texto, estilo, source, channels }) => {
+const applyUpdateMany = ({ texto, estilo, source, channels, bibleInfo }) => {
   const targetChannels = (channels || [CHANNELS.DEFAULT]).map(getSafeChannel);
   const uniqueChannels = [...new Set(targetChannels)];
   const results = [];
 
   for (const channel of uniqueChannels) {
-    const result = applyUpdate({ texto, estilo, source, channel });
+    const result = applyUpdate({ texto, estilo, source, channel, bibleInfo });
     results.push(result);
-    mirrorToDefault({ texto, estilo, source, channel });
+    mirrorToDefault({ texto, estilo, source, channel, bibleInfo });
   }
 
   return results;
@@ -221,10 +236,10 @@ const restartHolyricsPull = () => {
 
   holyricsRunner = startHolyricsPull({
     config: holyricsConfig,
-    onLyric: ({ text, type }) => {
+    onLyric: ({ text, type, bibleInfo, raw }) => {
       const holyricsChannel = resolveIncomingHolyricsChannel({ type, text });
-      applyUpdate({ texto: text, source: "holyrics-pull", channel: holyricsChannel });
-      mirrorToDefault({ texto: text, source: "holyrics-pull", channel: holyricsChannel });
+      applyUpdate({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo });
+      mirrorToDefault({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo });
 
       if (holyricsChannel !== CHANNELS.DEFAULT) {
         lastHolyricsContentChannel = holyricsChannel;
@@ -235,6 +250,11 @@ const restartHolyricsPull = () => {
       holyricsDiagnostics.lastError = null;
       holyricsDiagnostics.lastType = type || null;
       holyricsDiagnostics.lastChannel = holyricsChannel;
+      try {
+        holyricsDiagnostics.lastResponsePreview = JSON.stringify(raw).slice(0, 400);
+      } catch (_error) {
+        holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
+      }
     },
     onError: (error) => {
       holyricsDiagnostics.lastError = error?.message || "Erro desconhecido";
@@ -327,8 +347,30 @@ app.post("/holyrics/webhook", (req, res) => {
     text: texto
   });
 
-  const result = applyUpdate({ texto, source: "holyrics-webhook", channel });
-  mirrorToDefault({ texto, source: "holyrics-webhook", channel });
+  const extractedBibleInfo = extractBibleInfo(req.body || {});
+  const sanitizedTexto = sanitizeHolyricsText(texto);
+  const normalizedBible =
+    channel === CHANNELS.BIBLE
+      ? normalizeBibleContent({
+          text: sanitizedTexto,
+          bibleInfo: extractedBibleInfo
+        })
+      : {
+          text: sanitizedTexto,
+          bibleInfo: extractedBibleInfo
+        };
+  const result = applyUpdate({
+    texto: normalizedBible.text,
+    source: "holyrics-webhook",
+    channel,
+    bibleInfo: normalizedBible.bibleInfo
+  });
+  mirrorToDefault({
+    texto: normalizedBible.text,
+    source: "holyrics-webhook",
+    channel,
+    bibleInfo: normalizedBible.bibleInfo
+  });
 
   if (channel !== CHANNELS.DEFAULT) {
     lastHolyricsContentChannel = channel;

@@ -258,19 +258,82 @@ button.ghost:hover {
 .preview-box {
   margin-top: 14px;
   border-radius: 14px;
-  min-height: 120px;
-  padding: 16px;
+  min-height: 280px;
+  padding: 20px;
   border: 1px dashed rgba(255, 255, 255, 0.2);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
 }
 
 .preview-box p {
   margin: 0;
   width: 100%;
+  position: relative;
+  z-index: 1;
   font-size: clamp(1.05rem, 1.4vw, 1.38rem);
   line-height: 1.35;
   white-space: pre-wrap;
+}
+
+.preview-meta {
+  position: absolute;
+  z-index: 3;
+  max-width: min(88%, 780px);
+  padding: 0.2em 0.48em;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.42);
+  line-height: 1.15;
+  font-weight: 700;
+  white-space: normal;
+}
+
+.preview-version {
+  font-weight: 600;
+}
+
+.preview-reference {
+  font-weight: 800;
+}
+
+.preview-top-left {
+  top: 12px;
+  left: 12px;
+  text-align: left;
+}
+
+.preview-top-center {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.preview-top-right {
+  top: 12px;
+  right: 12px;
+  text-align: right;
+}
+
+.preview-bottom-left {
+  bottom: 12px;
+  left: 12px;
+  text-align: left;
+}
+
+.preview-bottom-center {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.preview-bottom-right {
+  bottom: 12px;
+  right: 12px;
+  text-align: right;
 }
 
 .compact .inline-form {
