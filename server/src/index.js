@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,7 @@ const io = new Server(server, {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const runtimeConfigPath = path.resolve(__dirname, "../data/runtime-config.json");
 
 let channelStates = createInitialChannelStates();
 let holyricsRunner;
@@ -86,6 +88,100 @@ let holyricsConfig = sanitizeHolyricsConfig({
   pullIntervalMs: process.env.HOLYRICS_PULL_INTERVAL_MS,
   timeoutMs: process.env.HOLYRICS_TIMEOUT_MS
 });
+
+let persistRuntimeConfigTimer;
+
+const buildPersistedRuntimeConfig = () => ({
+  version: 1,
+  savedAt: new Date().toISOString(),
+  lastHolyricsContentChannel,
+  styles: {
+    [CHANNELS.DEFAULT]: channelStates[CHANNELS.DEFAULT]?.estilo || {},
+    [CHANNELS.MUSIC]: channelStates[CHANNELS.MUSIC]?.estilo || {},
+    [CHANNELS.BIBLE]: channelStates[CHANNELS.BIBLE]?.estilo || {}
+  },
+  layoutConfig,
+  holyricsConfig
+});
+
+const persistRuntimeConfigNow = async () => {
+  const payload = buildPersistedRuntimeConfig();
+  await fs.mkdir(path.dirname(runtimeConfigPath), { recursive: true });
+  await fs.writeFile(runtimeConfigPath, JSON.stringify(payload, null, 2), "utf8");
+};
+
+const schedulePersistRuntimeConfig = () => {
+  if (persistRuntimeConfigTimer) {
+    clearTimeout(persistRuntimeConfigTimer);
+  }
+
+  persistRuntimeConfigTimer = setTimeout(() => {
+    persistRuntimeConfigNow().catch((error) => {
+      console.warn(`[runtime-config] Falha ao salvar configuracao: ${error.message}`);
+    });
+  }, 180);
+};
+
+const loadPersistedRuntimeConfig = async () => {
+  try {
+    const raw = await fs.readFile(runtimeConfigPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn(`[runtime-config] Falha ao carregar configuracao: ${error.message}`);
+    }
+    return null;
+  }
+};
+
+const applyPersistedRuntimeConfig = (persisted) => {
+  if (!persisted || typeof persisted !== "object") {
+    return;
+  }
+
+  if (persisted.layoutConfig && typeof persisted.layoutConfig === "object") {
+    layoutConfig = sanitizeLayoutConfig({
+      ...layoutConfig,
+      ...persisted.layoutConfig
+    });
+  }
+
+  if (persisted.holyricsConfig && typeof persisted.holyricsConfig === "object") {
+    holyricsConfig = sanitizeHolyricsConfig({
+      ...holyricsConfig,
+      ...persisted.holyricsConfig
+    });
+  }
+
+  const persistedStyles = persisted.styles;
+  if (persistedStyles && typeof persistedStyles === "object") {
+    let nextStates = channelStates;
+
+    for (const channel of Object.values(CHANNELS)) {
+      const persistedStyle = persistedStyles[channel];
+      if (!persistedStyle || typeof persistedStyle !== "object") {
+        continue;
+      }
+
+      const { state } = mergeState(nextStates[channel], {
+        estilo: persistedStyle,
+        source: "runtime-config:load"
+      });
+
+      nextStates = {
+        ...nextStates,
+        [channel]: state
+      };
+    }
+
+    channelStates = nextStates;
+  }
+
+  if (typeof persisted.lastHolyricsContentChannel === "string") {
+    lastHolyricsContentChannel = getSafeChannel(persisted.lastHolyricsContentChannel);
+  }
+};
 
 const clampMusicBreakLines = (value) => {
   const parsed = Number(value);
@@ -263,6 +359,12 @@ const restartHolyricsPull = () => {
   });
 };
 
+const persistedRuntimeConfig = await loadPersistedRuntimeConfig();
+if (persistedRuntimeConfig) {
+  applyPersistedRuntimeConfig(persistedRuntimeConfig);
+  console.info(`[runtime-config] Configuracao carregada de ${runtimeConfigPath}`);
+}
+
 restartHolyricsPull();
 
 io.on("connection", (socket) => {
@@ -286,6 +388,10 @@ io.on("connection", (socket) => {
       source: "socket-panel",
       channels
     });
+
+    if (payload?.estilo && results.some((item) => item.changed)) {
+      schedulePersistRuntimeConfig();
+    }
 
     if (typeof ack === "function") {
       ack({ ok: true, changed: results.some((item) => item.changed), channels });
@@ -324,6 +430,10 @@ app.post("/letra", (req, res) => {
     source: "http-post",
     channels
   });
+
+  if (req.body?.estilo && results.some((item) => item.changed)) {
+    schedulePersistRuntimeConfig();
+  }
 
   res.json({
     ok: true,
@@ -407,6 +517,7 @@ app.post("/holyrics/config", (req, res) => {
   });
 
   restartHolyricsPull();
+  schedulePersistRuntimeConfig();
 
   res.json({
     ok: true,
@@ -437,6 +548,8 @@ app.post("/layout/config", (req, res) => {
       channel: CHANNELS.MUSIC
     });
   }
+
+  schedulePersistRuntimeConfig();
 
   res.json({
     ok: true,
