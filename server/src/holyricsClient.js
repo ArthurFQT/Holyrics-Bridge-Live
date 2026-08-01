@@ -1,4 +1,5 @@
-﻿import axios from "axios";
+﻿
+import axios from "axios";
 
 const getByPath = (obj, path) => {
   if (!path) {
@@ -48,7 +49,10 @@ const getFirstTextByPaths = (data, paths = []) => {
   return "";
 };
 
-const normalizeInlineSpaces = (value) => String(value || "").replace(/\s+/g, " ").trim();
+const normalizeInlineSpaces = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
 const stripHtmlTags = (value) => String(value || "").replace(/<[^>]*>/g, " ");
 
 const cleanBibleVersionText = (value) => {
@@ -60,9 +64,11 @@ const cleanBibleVersionText = (value) => {
   return cleaned.replace(/^\(([^)]+)\)$/, "$1").trim();
 };
 
-const cleanBibleReferenceText = (value) => normalizeInlineSpaces(stripHtmlTags(value));
+const cleanBibleReferenceText = (value) =>
+  normalizeInlineSpaces(stripHtmlTags(value));
 
-const looksLikeBibleAbbreviationLine = (line) => /^\(?\s*[A-Z]{2,8}\s*\)?$/.test(String(line || "").trim());
+const looksLikeBibleAbbreviationLine = (line) =>
+  /^\(?\s*[A-Z]{2,8}\s*\)?$/.test(String(line || "").trim());
 
 const looksLikeBibleVersionLine = (line) => {
   const value = normalizeInlineSpaces(line).toLowerCase();
@@ -74,7 +80,9 @@ const looksLikeBibleVersionLine = (line) => {
     return true;
   }
 
-  return /(b[ií]blia|bible|almeida|nvi|acf|ara|arc|nvt|ntlh|king james|kjv|vers[aã]o)/i.test(value);
+  return /(b[ií]blia|bible|almeida|nvi|acf|ara|arc|nvt|ntlh|king james|kjv|vers[aã]o)/i.test(
+    value,
+  );
 };
 
 const looksLikeBibleReferenceLine = (line) => {
@@ -87,9 +95,11 @@ const looksLikeBibleReferenceLine = (line) => {
 };
 
 const equalsIgnoringCaseAndExtraSpaces = (left, right) =>
-  normalizeInlineSpaces(left).toLowerCase() === normalizeInlineSpaces(right).toLowerCase();
+  normalizeInlineSpaces(left).toLowerCase() ===
+  normalizeInlineSpaces(right).toLowerCase();
 
-const isBibleVersionAbbreviation = (value) => /^[A-Z0-9]{2,8}$/i.test(cleanBibleVersionText(value));
+const isBibleVersionAbbreviation = (value) =>
+  /^[A-Z0-9]{2,8}$/i.test(cleanBibleVersionText(value));
 
 const pickBestBibleVersion = (currentValue, nextValue) => {
   const current = cleanBibleVersionText(currentValue);
@@ -131,7 +141,7 @@ export const extractBibleInfo = (data) => {
   if (!data || typeof data !== "object") {
     return {
       version: "",
-      reference: ""
+      reference: "",
     };
   }
 
@@ -149,8 +159,8 @@ export const extractBibleInfo = (data) => {
       "current.version",
       "current.version_abbr",
       "current.versionAbbr",
-      "slide.version"
-    ])
+      "slide.version",
+    ]),
   );
 
   const directReference = getFirstTextByPaths(data, [
@@ -168,7 +178,7 @@ export const extractBibleInfo = (data) => {
     "current.header",
     "current.ref",
     "slide.header",
-    "slide.reference"
+    "slide.reference",
   ]);
 
   const book = getFirstTextByPaths(data, [
@@ -180,7 +190,7 @@ export const extractBibleInfo = (data) => {
     "book",
     "livro",
     "current.book",
-    "slide.book"
+    "slide.book",
   ]);
 
   const chapter = getFirstTextByPaths(data, [
@@ -188,7 +198,7 @@ export const extractBibleInfo = (data) => {
     "chapter",
     "capitulo",
     "current.chapter",
-    "slide.chapter"
+    "slide.chapter",
   ]);
 
   const verse = getFirstTextByPaths(data, [
@@ -198,7 +208,7 @@ export const extractBibleInfo = (data) => {
     "verses",
     "versiculo",
     "current.verse",
-    "slide.verse"
+    "slide.verse",
   ]);
 
   let reference = cleanBibleReferenceText(directReference);
@@ -217,7 +227,7 @@ export const extractBibleInfo = (data) => {
 
   return {
     version,
-    reference
+    reference,
   };
 };
 
@@ -234,7 +244,7 @@ const resolveText = (data, preferredPath) => {
     "lyric",
     "current.texto",
     "current.text",
-    "slide.text"
+    "slide.text",
   ].filter(Boolean);
 
   for (const path of candidates) {
@@ -247,6 +257,27 @@ const resolveText = (data, preferredPath) => {
   return { found: false, text: "" };
 };
 
+const inferTypeFromContent = (data, text) => {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) {
+    return "";
+  }
+
+  const looksLikeBible =
+    /\b(?:genesis|gênesis|exodo|êxodo|levitico|levítico|numeros|números|deuteronômio|josué|juízes|rute|1 samuel|2 samuel|1 reis|2 reis|1 cronicas|2 cronicas|esdras|neemias|ester|joão|mateus|marcos|lucas|joão|atos|romanos|coríntios|gálatas|efésios|filipenses|colossenses|tessalonicenses|timóteo|tiago|pedro|judas|apocalipse|psalm|salmo|provérbios|provérbios|isaias|jeremias|ezequiel|daniel|oseias|joel|amós|obadias|jonas|miqueias|naum|habacuque|sofonias|ageu|zacarias|malaquias)\b/i.test(
+      normalizedText,
+    );
+
+  const hasBibleReference =
+    /\b\d{1,3}\s*:\s*\d{1,3}(?:\s*[-–]\s*\d{1,3})?\b/.test(normalizedText);
+
+  if (looksLikeBible || hasBibleReference) {
+    return "BIBLE";
+  }
+
+  return "";
+};
+
 const resolveType = (data) => {
   if (!data || typeof data !== "object") {
     return "";
@@ -256,12 +287,23 @@ const resolveType = (data) => {
 
   for (const path of candidates) {
     const value = getByPath(data, path);
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
+    if (value === null || value === undefined) {
+      continue;
     }
+
+    const stringValue = typeof value === "string" ? value : String(value);
+    const trimmed = stringValue.trim();
+    const normalized = trimmed.toUpperCase();
+
+    if (!trimmed || ["EMPTY", "NULL", "UNDEFINED"].includes(normalized)) {
+      continue;
+    }
+
+    return trimmed;
   }
 
-  return "";
+  const resolvedText = resolveText(data, "map.text");
+  return inferTypeFromContent(data, resolvedText.text);
 };
 
 const createHeaders = (config) => {
@@ -271,16 +313,17 @@ const createHeaders = (config) => {
 
   if (config.tokenHeader.toLowerCase() === "authorization") {
     return {
-      Authorization: `Bearer ${config.token}`
+      Authorization: `Bearer ${config.token}`,
     };
   }
 
   return {
-    [config.tokenHeader]: config.token
+    [config.tokenHeader]: config.token,
   };
 };
 
-const createUrl = (config) => `http://${config.host}:${config.port}${config.path}`;
+const createUrl = (config) =>
+  `http://${config.host}:${config.port}${config.path}`;
 
 const decodeHtmlEntities = (value) =>
   value
@@ -293,7 +336,10 @@ const decodeHtmlEntities = (value) =>
 
 const sanitizeHolyricsText = (text) => {
   const cleaned = String(text || "")
-    .replace(/<span[^>]*id=['"]text-force-update_[^'"]*['"][^>]*>\s*<\/span>/gi, "")
+    .replace(
+      /<span[^>]*id=['"]text-force-update_[^'"]*['"][^>]*>\s*<\/span>/gi,
+      "",
+    )
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|ctt)>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ")
@@ -369,8 +415,8 @@ const splitBibleTextFromInlineMeta = (text, bibleInfo = {}) => {
     text: bodyText,
     bibleInfo: {
       version,
-      reference
-    }
+      reference,
+    },
   };
 };
 
@@ -379,7 +425,12 @@ export const normalizeBibleContent = ({ text, bibleInfo }) =>
 
 export { sanitizeHolyricsText };
 
-export const startHolyricsPull = ({ config, onLyric, onError, logger = console }) => {
+export const startHolyricsPull = ({
+  config,
+  onLyric,
+  onError,
+  logger = console,
+}) => {
   let timer;
   let running = false;
 
@@ -387,7 +438,7 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
     if (!config.pullEnabled || running) {
       return {
         ok: false,
-        skipped: !config.pullEnabled ? "pull_disabled" : "already_running"
+        skipped: !config.pullEnabled ? "pull_disabled" : "already_running",
       };
     }
 
@@ -398,19 +449,21 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
         method: config.method,
         url: createUrl(config),
         timeout: config.timeoutMs,
-        headers: createHeaders(config)
+        headers: createHeaders(config),
       });
 
       const resolved = resolveText(response.data, config.textPath);
       const holyricsType = resolveType(response.data);
       const extractedBibleInfo = extractBibleInfo(response.data);
       const sanitizedText = sanitizeHolyricsText(resolved.text);
-      const isBible = String(holyricsType || "").toUpperCase().includes("BIBLE");
+      const isBible = /BIBLE|VERSE|VERS[IÍ]CULO|B[IÍ]BLIA/.test(
+        String(holyricsType || "").toUpperCase(),
+      );
       const normalizedBible = isBible
         ? splitBibleTextFromInlineMeta(sanitizedText, extractedBibleInfo)
         : {
             text: sanitizedText,
-            bibleInfo: extractedBibleInfo
+            bibleInfo: extractedBibleInfo,
           };
 
       if (resolved.found) {
@@ -418,7 +471,7 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
           text: normalizedBible.text,
           type: holyricsType,
           bibleInfo: normalizedBible.bibleInfo,
-          raw: response.data
+          raw: response.data,
         });
       }
 
@@ -429,7 +482,7 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
         textoLength: normalizedBible.text.length,
         type: holyricsType,
         bibleInfo: normalizedBible.bibleInfo,
-        responseData: response.data
+        responseData: response.data,
       };
     } catch (error) {
       onError?.(error);
@@ -438,7 +491,7 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
       return {
         ok: false,
         url: createUrl(config),
-        error: error.message
+        error: error.message,
       };
     } finally {
       running = false;
@@ -448,9 +501,13 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
   if (config.pullEnabled) {
     fetchNow();
     timer = setInterval(fetchNow, config.pullIntervalMs);
-    logger.info(`[holyrics] Pull ativo em ${createUrl(config)} (${config.pullIntervalMs}ms)`);
+    logger.info(
+      `[holyrics] Pull ativo em ${createUrl(config)} (${config.pullIntervalMs}ms)`,
+    );
   } else {
-    logger.info("[holyrics] Pull desativado. Use webhook ou ative pull no painel.");
+    logger.info(
+      "[holyrics] Pull desativado. Use webhook ou ative pull no painel.",
+    );
   }
 
   return {
@@ -459,6 +516,6 @@ export const startHolyricsPull = ({ config, onLyric, onError, logger = console }
         clearInterval(timer);
       }
     },
-    fetchNow
+    fetchNow,
   };
 };

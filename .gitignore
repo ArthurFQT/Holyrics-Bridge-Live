@@ -6,3 +6,4 @@ server/.env
 control-panel/.env
 npm-debug.log*
 server/data/runtime-config.json
+.claude

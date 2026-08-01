@@ -90,6 +90,21 @@ h2 {
   color: var(--text-soft);
 }
 
+.type-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  vertical-align: middle;
+}
+
 .hero {
   display: grid;
   gap: 14px;

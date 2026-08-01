@@ -68,7 +68,8 @@ const createInitialDrafts = () =>
       bibleInfo: {
         version: "",
         reference: ""
-      }
+      },
+      type: ""
     };
     return acc;
   }, {});
@@ -120,6 +121,8 @@ const parseBibleInfo = (info = {}) => ({
   reference: typeof info?.reference === "string" ? info.reference.trim() : ""
 });
 
+const parseType = (value) => (typeof value === "string" ? value.trim() : "");
+
 const toPreviewMetaClass = (position = "top-right") => {
   const normalized = String(position || "").toLowerCase();
   if (
@@ -170,7 +173,8 @@ function App() {
   const currentDraft = channelDrafts[selectedChannel] || {
     texto: "",
     style: initialStyle,
-    bibleInfo: { version: "", reference: "" }
+    bibleInfo: { version: "", reference: "" },
+    type: ""
   };
   const currentStyle = currentDraft.style;
   const isBottomPosition = (position) => String(position || "").toLowerCase().startsWith("bottom");
@@ -259,7 +263,8 @@ function App() {
       const current = prev[channel] || {
         texto: "",
         style: { ...initialStyle },
-        bibleInfo: { version: "", reference: "" }
+        bibleInfo: { version: "", reference: "" },
+        type: ""
       };
       const nextPartial = typeof updater === "function" ? updater(current) : updater;
 
@@ -289,7 +294,8 @@ function App() {
       updateDraft(channel, (current) => ({
         texto: typeof data?.texto === "string" ? data.texto : current.texto,
         style: data?.estilo ? parseServerStyle(data.estilo) : current.style,
-        bibleInfo: parseBibleInfo(data?.meta?.bibleInfo)
+        bibleInfo: parseBibleInfo(data?.meta?.bibleInfo),
+        type: parseType(data?.meta?.type)
       }));
     },
     [updateDraft]
@@ -312,7 +318,8 @@ function App() {
       updateDraft(selectedChannel, (current) => ({
         texto: typeof payload?.texto === "string" ? payload.texto : current.texto,
         style: payload?.estilo ? parseServerStyle(payload.estilo) : current.style,
-        bibleInfo: parseBibleInfo(payload?.meta?.bibleInfo)
+        bibleInfo: parseBibleInfo(payload?.meta?.bibleInfo),
+        type: parseType(payload?.meta?.type)
       }));
     };
 
@@ -671,6 +678,11 @@ function App() {
         <h2>Editor de Canal</h2>
         <p className="subtitle">
           Canal em edicao: <strong>{CHANNELS.find((channel) => channel.id === selectedChannel)?.label}</strong>
+          {currentDraft.type ? (
+            <span className="type-badge" title="Tipo retornado pelo Holyrics">
+              {currentDraft.type}
+            </span>
+          ) : null}
         </p>
 
         <form onSubmit={handleSendSelected} className="editor-grid">

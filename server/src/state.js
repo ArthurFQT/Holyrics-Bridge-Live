@@ -79,6 +79,7 @@ export const createInitialState = () => ({
     version: "",
     reference: ""
   },
+  type: "",
   updatedAt: new Date().toISOString(),
   source: "system"
 });
@@ -183,6 +184,9 @@ const sanitizeBibleInfo = (input = {}) => ({
   reference: typeof input?.reference === "string" ? input.reference.trim() : ""
 });
 
+const sanitizeType = (value, fallback = "") =>
+  typeof value === "string" ? value.trim() : fallback;
+
 const normalizeText = (value, fallback = "") => {
   if (typeof value !== "string") {
     return fallback;
@@ -209,16 +213,28 @@ export const mergeState = (currentState, input = {}) => {
     incomingBibleInfo = { version: "", reference: "" };
   }
 
+  let incomingType = currentState.type || "";
+
+  if (input.type === null) {
+    incomingType = "";
+  } else if (input.type !== undefined) {
+    incomingType = sanitizeType(input.type);
+  } else if (textChanged) {
+    incomingType = "";
+  }
+
   const nextState = {
     texto: incomingText,
     estilo: incomingStyle,
     bibleInfo: incomingBibleInfo,
+    type: incomingType,
     updatedAt: new Date().toISOString(),
     source: input.source || "manual"
   };
 
   const changed =
     currentState.texto !== nextState.texto ||
+    (currentState.type || "") !== nextState.type ||
     JSON.stringify(currentState.bibleInfo || {}) !== JSON.stringify(nextState.bibleInfo || {}) ||
     JSON.stringify(currentState.estilo) !== JSON.stringify(nextState.estilo);
 
@@ -264,6 +280,7 @@ export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
       updatedAt: state.updatedAt,
       source: state.source,
       channel: getSafeChannel(channel),
+      type: state.type || "",
       bibleInfo
     }
   };
@@ -272,11 +289,13 @@ export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
 export const resolveHolyricsChannel = (holyricsType) => {
   const normalized = String(holyricsType || "").toUpperCase();
 
-  if (normalized.includes("MUSIC")) {
+  // Holyrics costuma retornar "song"/"music" para musicas e "verse"/"bible"
+  // (e variantes em PT) para versiculos.
+  if (/MUSIC|SONG|M[UÚ]SICA/.test(normalized)) {
     return CHANNELS.MUSIC;
   }
 
-  if (normalized.includes("BIBLE")) {
+  if (/BIBLE|VERSE|VERS[IÍ]CULO|B[IÍ]BLIA/.test(normalized)) {
     return CHANNELS.BIBLE;
   }
 

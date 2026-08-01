@@ -262,7 +262,7 @@ const resolveBibleInfoForChannel = (channel, bibleInfo) => {
   return bibleInfo || undefined;
 };
 
-const applyUpdate = ({ texto, estilo, source, channel, bibleInfo }) => {
+const applyUpdate = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   const safeChannel = getSafeChannel(channel);
   const transformedText = transformTextByChannel(texto, safeChannel);
   const currentState = channelStates[safeChannel];
@@ -270,7 +270,8 @@ const applyUpdate = ({ texto, estilo, source, channel, bibleInfo }) => {
     texto: transformedText,
     estilo,
     source,
-    bibleInfo: resolveBibleInfoForChannel(safeChannel, bibleInfo)
+    bibleInfo: resolveBibleInfoForChannel(safeChannel, bibleInfo),
+    type
   });
   channelStates = {
     ...channelStates,
@@ -288,7 +289,7 @@ const applyUpdate = ({ texto, estilo, source, channel, bibleInfo }) => {
   };
 };
 
-const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo }) => {
+const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   if (channel === CHANNELS.DEFAULT) {
     return;
   }
@@ -298,19 +299,20 @@ const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo }) => {
     estilo,
     source: `${source}:default-mirror`,
     channel: CHANNELS.DEFAULT,
-    bibleInfo: channel === CHANNELS.BIBLE ? bibleInfo : null
+    bibleInfo: channel === CHANNELS.BIBLE ? bibleInfo : null,
+    type
   });
 };
 
-const applyUpdateMany = ({ texto, estilo, source, channels, bibleInfo }) => {
+const applyUpdateMany = ({ texto, estilo, source, channels, bibleInfo, type }) => {
   const targetChannels = (channels || [CHANNELS.DEFAULT]).map(getSafeChannel);
   const uniqueChannels = [...new Set(targetChannels)];
   const results = [];
 
   for (const channel of uniqueChannels) {
-    const result = applyUpdate({ texto, estilo, source, channel, bibleInfo });
+    const result = applyUpdate({ texto, estilo, source, channel, bibleInfo, type });
     results.push(result);
-    mirrorToDefault({ texto, estilo, source, channel, bibleInfo });
+    mirrorToDefault({ texto, estilo, source, channel, bibleInfo, type });
   }
 
   return results;
@@ -334,8 +336,8 @@ const restartHolyricsPull = () => {
     config: holyricsConfig,
     onLyric: ({ text, type, bibleInfo, raw }) => {
       const holyricsChannel = resolveIncomingHolyricsChannel({ type, text });
-      applyUpdate({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo });
-      mirrorToDefault({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo });
+      applyUpdate({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo, type });
+      mirrorToDefault({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo, type });
 
       if (holyricsChannel !== CHANNELS.DEFAULT) {
         lastHolyricsContentChannel = holyricsChannel;
@@ -452,8 +454,10 @@ app.post("/holyrics/webhook", (req, res) => {
     req.body?.current?.text ||
     "";
 
+  const holyricsType =
+    req.body?.type || req.body?.current?.type || req.body?.slide?.type || "";
   const channel = resolveIncomingHolyricsChannel({
-    type: req.body?.type || req.body?.current?.type || req.body?.slide?.type,
+    type: holyricsType,
     text: texto
   });
 
@@ -473,13 +477,15 @@ app.post("/holyrics/webhook", (req, res) => {
     texto: normalizedBible.text,
     source: "holyrics-webhook",
     channel,
-    bibleInfo: normalizedBible.bibleInfo
+    bibleInfo: normalizedBible.bibleInfo,
+    type: holyricsType
   });
   mirrorToDefault({
     texto: normalizedBible.text,
     source: "holyrics-webhook",
     channel,
-    bibleInfo: normalizedBible.bibleInfo
+    bibleInfo: normalizedBible.bibleInfo,
+    type: holyricsType
   });
 
   if (channel !== CHANNELS.DEFAULT) {
@@ -537,7 +543,8 @@ app.post("/layout/config", (req, res) => {
     texto: musicReformatted,
     estilo: musicCurrent.estilo,
     source: "layout-config",
-    channel: CHANNELS.MUSIC
+    channel: CHANNELS.MUSIC,
+    type: musicCurrent.type
   });
 
   if (musicChanged.changed) {
@@ -545,7 +552,8 @@ app.post("/layout/config", (req, res) => {
       texto: channelStates[CHANNELS.MUSIC].texto,
       estilo: channelStates[CHANNELS.MUSIC].estilo,
       source: "layout-config",
-      channel: CHANNELS.MUSIC
+      channel: CHANNELS.MUSIC,
+      type: channelStates[CHANNELS.MUSIC].type
     });
   }
 
