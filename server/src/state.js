@@ -3,7 +3,7 @@
 export const CHANNELS = {
   DEFAULT: "default",
   MUSIC: "music",
-  BIBLE: "bible"
+  BIBLE: "bible",
 };
 
 const validChannels = new Set(Object.values(CHANNELS));
@@ -11,7 +11,8 @@ const validChannels = new Set(Object.values(CHANNELS));
 const defaultStyle = {
   color: "#ffffff",
   fontSize: 72,
-  fontFamily: "Arial, sans-serif",
+  fontFamily: '"Manrope", "Segoe UI", sans-serif',
+  fontImportUrl: "",
   textAlign: "center",
   shadowEnabled: true,
   shadowIntensity: 65,
@@ -28,7 +29,7 @@ const defaultStyle = {
   bibleReferencePosition: "bottom-right",
   bibleVersionFontSize: 32,
   bibleReferenceFontSize: 40,
-  fade: false
+  fade: false,
 };
 
 const validBackgroundModes = new Set(["transparent", "solid", "gradient"]);
@@ -38,7 +39,7 @@ const validBibleMetaPositions = new Set([
   "top-right",
   "bottom-left",
   "bottom-center",
-  "bottom-right"
+  "bottom-right",
 ]);
 const validGradientDirections = new Set([
   "to top",
@@ -48,7 +49,7 @@ const validGradientDirections = new Set([
   "to top right",
   "to top left",
   "to bottom right",
-  "to bottom left"
+  "to bottom left",
 ]);
 
 const normalizeHexColor = (value, fallback = "#000000") => {
@@ -58,12 +59,18 @@ const normalizeHexColor = (value, fallback = "#000000") => {
 
 const hexToRgb = (hexColor) => {
   const hex = normalizeHexColor(hexColor).replace("#", "");
-  const full = hex.length === 3 ? hex.split("").map((c) => `${c}${c}`).join("") : hex;
+  const full =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((c) => `${c}${c}`)
+          .join("")
+      : hex;
 
   return {
     r: parseInt(full.slice(0, 2), 16),
     g: parseInt(full.slice(2, 4), 16),
-    b: parseInt(full.slice(4, 6), 16)
+    b: parseInt(full.slice(4, 6), 16),
   };
 };
 
@@ -77,26 +84,30 @@ export const createInitialState = () => ({
   estilo: buildRenderStyle(defaultStyle),
   bibleInfo: {
     version: "",
-    reference: ""
+    reference: "",
   },
   type: "",
   updatedAt: new Date().toISOString(),
-  source: "system"
+  source: "system",
 });
 
 export const createInitialChannelStates = () => ({
   [CHANNELS.DEFAULT]: createInitialState(),
   [CHANNELS.MUSIC]: createInitialState(),
-  [CHANNELS.BIBLE]: createInitialState()
+  [CHANNELS.BIBLE]: createInitialState(),
 });
 
 export const buildRenderStyle = (styleInput = {}) => {
   const merged = {
     ...defaultStyle,
-    ...(styleInput || {})
+    ...(styleInput || {}),
   };
 
-  const fontSize = clamp(Number(merged.fontSize) || defaultStyle.fontSize, 16, 220);
+  const fontSize = clamp(
+    Number(merged.fontSize) || defaultStyle.fontSize,
+    16,
+    220,
+  );
   const shadowIntensity = clamp(Number(merged.shadowIntensity) || 0, 0, 100);
   const shadowEnabled = Boolean(merged.shadowEnabled);
 
@@ -106,38 +117,49 @@ export const buildRenderStyle = (styleInput = {}) => {
     ? `0px 2px ${shadowBlur}px rgba(0, 0, 0, ${shadowAlpha}), 0px 0px 2px rgba(0, 0, 0, 0.45)`
     : "none";
 
-  const backgroundMode = validBackgroundModes.has(String(merged.backgroundMode || "").toLowerCase())
+  const backgroundMode = validBackgroundModes.has(
+    String(merged.backgroundMode || "").toLowerCase(),
+  )
     ? String(merged.backgroundMode).toLowerCase()
     : merged.backgroundTransparent
       ? "transparent"
       : "solid";
 
-  const backgroundColor = normalizeHexColor(merged.backgroundColor, defaultStyle.backgroundColor);
-  const gradientColor = normalizeHexColor(merged.gradientColor, backgroundColor);
+  const backgroundColor = normalizeHexColor(
+    merged.backgroundColor,
+    defaultStyle.backgroundColor,
+  );
+  const gradientColor = normalizeHexColor(
+    merged.gradientColor,
+    backgroundColor,
+  );
   const gradientOpacity = clamp(Number(merged.gradientOpacity) || 0, 0, 100);
   const gradientSpread = clamp(Number(merged.gradientSpread) || 0, 15, 100);
-  const gradientDirection = validGradientDirections.has(String(merged.gradientDirection || "").toLowerCase())
+  const gradientDirection = validGradientDirections.has(
+    String(merged.gradientDirection || "").toLowerCase(),
+  )
     ? String(merged.gradientDirection).toLowerCase()
     : defaultStyle.gradientDirection;
   const bibleVersionPosition = validBibleMetaPositions.has(
-    String(merged.bibleVersionPosition || "").toLowerCase()
+    String(merged.bibleVersionPosition || "").toLowerCase(),
   )
     ? String(merged.bibleVersionPosition).toLowerCase()
     : defaultStyle.bibleVersionPosition;
   const bibleReferencePosition = validBibleMetaPositions.has(
-    String(merged.bibleReferencePosition || "").toLowerCase()
+    String(merged.bibleReferencePosition || "").toLowerCase(),
   )
     ? String(merged.bibleReferencePosition).toLowerCase()
     : defaultStyle.bibleReferencePosition;
   const bibleVersionFontSize = clamp(
     Number(merged.bibleVersionFontSize) || defaultStyle.bibleVersionFontSize,
     14,
-    120
+    120,
   );
   const bibleReferenceFontSize = clamp(
-    Number(merged.bibleReferenceFontSize) || defaultStyle.bibleReferenceFontSize,
+    Number(merged.bibleReferenceFontSize) ||
+      defaultStyle.bibleReferenceFontSize,
     16,
-    140
+    140,
   );
 
   const rgb = hexToRgb(gradientColor);
@@ -151,10 +173,19 @@ export const buildRenderStyle = (styleInput = {}) => {
         ? backgroundColor
         : `linear-gradient(${gradientDirection}, ${gradientStart} 0%, ${gradientEnd} ${gradientSpread}%)`;
 
+  const fontFamily =
+    typeof merged.fontFamily === "string" && merged.fontFamily.trim()
+      ? merged.fontFamily.trim()
+      : defaultStyle.fontFamily;
+
   return {
     color: String(merged.color || defaultStyle.color),
     fontSize,
-    fontFamily: String(merged.fontFamily || defaultStyle.fontFamily),
+    fontFamily,
+    fontImportUrl:
+      typeof merged.fontImportUrl === "string"
+        ? merged.fontImportUrl.trim()
+        : "",
     textAlign: ["left", "center", "right", "justify"].includes(merged.textAlign)
       ? merged.textAlign
       : defaultStyle.textAlign,
@@ -175,13 +206,13 @@ export const buildRenderStyle = (styleInput = {}) => {
     bibleVersionFontSize,
     bibleReferenceFontSize,
     renderBackground,
-    fade: Boolean(merged.fade)
+    fade: Boolean(merged.fade),
   };
 };
 
 const sanitizeBibleInfo = (input = {}) => ({
   version: typeof input?.version === "string" ? input.version.trim() : "",
-  reference: typeof input?.reference === "string" ? input.reference.trim() : ""
+  reference: typeof input?.reference === "string" ? input.reference.trim() : "",
 });
 
 const sanitizeType = (value, fallback = "") =>
@@ -199,11 +230,14 @@ export const mergeState = (currentState, input = {}) => {
   const incomingText = normalizeText(input.texto, currentState.texto);
   const incomingStyle = buildRenderStyle({
     ...currentState.estilo,
-    ...(input.estilo || {})
+    ...(input.estilo || {}),
   });
   const textChanged = incomingText !== currentState.texto;
 
-  let incomingBibleInfo = currentState.bibleInfo || { version: "", reference: "" };
+  let incomingBibleInfo = currentState.bibleInfo || {
+    version: "",
+    reference: "",
+  };
 
   if (input.bibleInfo === null) {
     incomingBibleInfo = { version: "", reference: "" };
@@ -229,24 +263,27 @@ export const mergeState = (currentState, input = {}) => {
     bibleInfo: incomingBibleInfo,
     type: incomingType,
     updatedAt: new Date().toISOString(),
-    source: input.source || "manual"
+    source: input.source || "manual",
   };
 
   const changed =
     currentState.texto !== nextState.texto ||
     (currentState.type || "") !== nextState.type ||
-    JSON.stringify(currentState.bibleInfo || {}) !== JSON.stringify(nextState.bibleInfo || {}) ||
+    JSON.stringify(currentState.bibleInfo || {}) !==
+      JSON.stringify(nextState.bibleInfo || {}) ||
     JSON.stringify(currentState.estilo) !== JSON.stringify(nextState.estilo);
 
   return {
     changed,
-    state: changed ? nextState : currentState
+    state: changed ? nextState : currentState,
   };
 };
 
 export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
   const style = state.estilo;
-  const renderBackgroundColor = style.backgroundTransparent ? "transparent" : style.backgroundColor;
+  const renderBackgroundColor = style.backgroundTransparent
+    ? "transparent"
+    : style.backgroundColor;
   const bibleInfo = sanitizeBibleInfo(state.bibleInfo);
 
   return {
@@ -257,6 +294,7 @@ export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
       textAlign: style.textAlign,
       textShadow: style.textShadow,
       fontFamily: style.fontFamily,
+      fontImportUrl: style.fontImportUrl || "",
       shadowEnabled: style.shadowEnabled,
       shadowIntensity: style.shadowIntensity,
       backgroundMode: style.backgroundMode,
@@ -274,15 +312,15 @@ export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
       bibleReferenceFontSize: style.bibleReferenceFontSize,
       renderBackground: style.renderBackground,
       renderBackgroundColor,
-      fade: style.fade
+      fade: style.fade,
     },
     meta: {
       updatedAt: state.updatedAt,
       source: state.source,
       channel: getSafeChannel(channel),
       type: state.type || "",
-      bibleInfo
-    }
+      bibleInfo,
+    },
   };
 };
 
@@ -312,5 +350,5 @@ export const sanitizeHolyricsConfig = (config) => ({
   textPath: String(config.textPath || "map.text"),
   pullEnabled: Boolean(config.pullEnabled),
   pullIntervalMs: clamp(Number(config.pullIntervalMs) || 400, 100, 5000),
-  timeoutMs: clamp(Number(config.timeoutMs) || 1500, 500, 6000)
+  timeoutMs: clamp(Number(config.timeoutMs) || 1500, 500, 6000),
 });

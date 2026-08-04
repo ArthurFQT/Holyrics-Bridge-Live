@@ -18,10 +18,33 @@ const BIBLE_META_POSITIONS = [
   { value: "bottom-right", label: "Rodape direito" }
 ];
 
+const FONT_OPTIONS = [
+  { value: '"Manrope", "Segoe UI", sans-serif', label: "Manrope" },
+  { value: '"Sora", "Manrope", sans-serif', label: "Sora" },
+  { value: '"Montserrat", "Arial", sans-serif', label: "Montserrat" },
+  { value: '"Poppins", "Arial", sans-serif', label: "Poppins" },
+  { value: '"Inter", "Segoe UI", sans-serif', label: "Inter" },
+  { value: '"Roboto", "Arial", sans-serif', label: "Roboto" },
+  { value: "Arial, sans-serif", label: "Arial" },
+  { value: "Georgia, serif", label: "Georgia" },
+  { value: '"Times New Roman", serif', label: "Times New Roman" },
+  { value: "custom", label: "Personalizada" }
+];
+
+const FONT_FALLBACKS = {
+  "Montserrat, sans-serif": '"Montserrat", "Arial", sans-serif',
+  "Poppins, sans-serif": '"Poppins", "Arial", sans-serif',
+  "Inter, sans-serif": '"Inter", "Segoe UI", sans-serif',
+  "Roboto, sans-serif": '"Roboto", "Arial", sans-serif',
+  "Sora, sans-serif": '"Sora", "Manrope", sans-serif',
+  "Manrope, sans-serif": '"Manrope", "Segoe UI", sans-serif'
+};
+
 const initialStyle = {
   color: "#ffffff",
   fontSize: 72,
-  fontFamily: "Montserrat, sans-serif",
+  fontFamily: '"Manrope", "Segoe UI", sans-serif',
+  fontImportUrl: "",
   textAlign: "center",
   shadowEnabled: true,
   shadowIntensity: 65,
@@ -96,7 +119,8 @@ const parseServerStyle = (style = {}) => {
 const buildStylePayload = (style) => ({
   color: style.color,
   fontSize: Number(style.fontSize),
-  fontFamily: style.fontFamily,
+  fontFamily: normalizeFontFamilySelection(style.fontFamily),
+  fontImportUrl: String(style.fontImportUrl || "").trim(),
   textAlign: style.textAlign,
   shadowEnabled: style.shadowEnabled,
   shadowIntensity: Number(style.shadowIntensity),
@@ -139,6 +163,49 @@ const toPreviewMetaClass = (position = "top-right") => {
   }
 
   return "preview-top-right";
+};
+
+const getFontSelectValue = (fontFamily) => {
+  const selected = String(fontFamily || initialStyle.fontFamily).trim();
+  return FONT_OPTIONS.some((option) => option.value === selected) ? selected : "custom";
+};
+
+const getCustomFontInputValue = (fontFamily) => {
+  const selected = String(fontFamily || initialStyle.fontFamily).trim();
+  return FONT_OPTIONS.some((option) => option.value === selected) ? "" : selected;
+};
+
+const normalizeFontFamilySelection = (fontFamily) => {
+  const selected = String(fontFamily || initialStyle.fontFamily).trim();
+  if (FONT_OPTIONS.some((option) => option.value === selected)) {
+    return selected;
+  }
+
+  if (FONT_FALLBACKS[selected]) {
+    return FONT_FALLBACKS[selected];
+  }
+
+  return selected || initialStyle.fontFamily;
+};
+
+const ensureGoogleFontImport = (url) => {
+  if (typeof document === "undefined" || !url) {
+    return;
+  }
+
+  const trimmedUrl = String(url).trim();
+  if (!trimmedUrl) {
+    return;
+  }
+
+  let link = document.querySelector(`link[data-google-font-import="${trimmedUrl}"]`);
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = trimmedUrl;
+    link.setAttribute("data-google-font-import", trimmedUrl);
+    document.head.appendChild(link);
+  }
 };
 
 const buildPreviewBackground = (style) => {
@@ -409,6 +476,10 @@ function App() {
       setStatus(`Falha ao atualizar dados do canal ${selectedChannel}.`);
     });
   }, [loadChannelState, selectedChannel]);
+
+  useEffect(() => {
+    ensureGoogleFontImport(currentStyle.fontImportUrl);
+  }, [currentStyle.fontImportUrl]);
 
   const handleStyleChange = (field, value) => {
     updateDraft(selectedChannel, (current) => ({
@@ -718,11 +789,42 @@ function App() {
 
           <label className="field">
             Fonte
+            <select
+              value={getFontSelectValue(currentStyle.fontFamily)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (nextValue === "custom") {
+                  return;
+                }
+
+                handleStyleChange("fontFamily", nextValue);
+              }}
+            >
+              {FONT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            Fonte personalizada
             <input
               type="text"
-              value={currentStyle.fontFamily}
+              value={getCustomFontInputValue(currentStyle.fontFamily)}
               onChange={(event) => handleStyleChange("fontFamily", event.target.value)}
-              placeholder="Ex: Montserrat, sans-serif"
+              placeholder='Ex: "Poppins", sans-serif'
+            />
+          </label>
+
+          <label className="field field-full">
+            URL do Google Fonts
+            <input
+              type="text"
+              value={currentStyle.fontImportUrl || ""}
+              onChange={(event) => handleStyleChange("fontImportUrl", event.target.value)}
+              placeholder='Ex: https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single&display=swap'
             />
           </label>
 

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Display vMix - Letras</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&family=Roboto:wght@400;500;700;900&display=swap");
+
       :root {
         color-scheme: only light;
       }
@@ -23,7 +25,7 @@
         inset: 0;
         padding: 0;
         box-sizing: border-box;
-        font-family: Arial, sans-serif;
+        font-family: "Manrope", "Segoe UI", sans-serif;
       }
 
       #stage {
@@ -89,7 +91,7 @@
         max-width: min(82vw, 1450px);
         padding: 0.26em 0.62em;
         border-radius: 10px;
-        font-family: Arial, sans-serif;
+        font-family: "Manrope", "Segoe UI", sans-serif;
         font-size: clamp(20px, 2.2vw, 34px);
         font-weight: 700;
         letter-spacing: 0.015em;
@@ -176,10 +178,33 @@
 
       const socket = io({
         transports: ["websocket"],
-        query: { channel }
+        query: { channel },
       });
 
+      const ensureGoogleFontImport = (url) => {
+        if (!url) {
+          return;
+        }
+
+        const trimmedUrl = String(url).trim();
+        if (!trimmedUrl) {
+          return;
+        }
+
+        let link = document.querySelector(
+          `link[data-google-font-import="${trimmedUrl}"]`,
+        );
+        if (!link) {
+          link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = trimmedUrl;
+          link.setAttribute("data-google-font-import", trimmedUrl);
+          document.head.appendChild(link);
+        }
+      };
+
       const applyStyle = (style = {}) => {
+        ensureGoogleFontImport(style.fontImportUrl);
         lyricNode.style.color = style.color || "#ffffff";
         lyricNode.style.fontSize = style.fontSize || "72px";
         lyricNode.style.textAlign = style.textAlign || "center";
@@ -187,13 +212,18 @@
         lyricNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
         bibleVersionNode.style.color = style.color || "#ffffff";
         bibleReferenceNode.style.color = style.color || "#ffffff";
-        bibleVersionNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
-        bibleReferenceNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        bibleVersionNode.style.fontFamily =
+          style.fontFamily || "Arial, sans-serif";
+        bibleReferenceNode.style.fontFamily =
+          style.fontFamily || "Arial, sans-serif";
         bibleVersionNode.style.textShadow = style.textShadow || "none";
         bibleReferenceNode.style.textShadow = style.textShadow || "none";
         bibleVersionNode.style.fontSize = `${Number(style.bibleVersionFontSize) || 32}px`;
         bibleReferenceNode.style.fontSize = `${Number(style.bibleReferenceFontSize) || 40}px`;
-        overlayNode.style.background = style.renderBackground || style.renderBackgroundColor || "transparent";
+        overlayNode.style.background =
+          style.renderBackground ||
+          style.renderBackgroundColor ||
+          "transparent";
       };
 
       const META_POSITION_CLASSES = [
@@ -202,21 +232,27 @@
         "meta-top-right",
         "meta-bottom-left",
         "meta-bottom-center",
-        "meta-bottom-right"
+        "meta-bottom-right",
       ];
 
       const applyMetaPosition = (node, position = "top-right") => {
-        META_POSITION_CLASSES.forEach((className) => node.classList.remove(className));
+        META_POSITION_CLASSES.forEach((className) =>
+          node.classList.remove(className),
+        );
         node.classList.add(`meta-${position}`);
       };
 
       const isBottomMetaNode = (node) =>
         META_POSITION_CLASSES.some(
-          (className) => className.startsWith("meta-bottom-") && node.classList.contains(className)
+          (className) =>
+            className.startsWith("meta-bottom-") &&
+            node.classList.contains(className),
         );
 
       const getMetaPositionClass = (node) =>
-        META_POSITION_CLASSES.find((className) => node.classList.contains(className)) || "";
+        META_POSITION_CLASSES.find((className) =>
+          node.classList.contains(className),
+        ) || "";
 
       const updateMetaLayout = () => {
         const allMetaNodes = [bibleVersionNode, bibleReferenceNode];
@@ -225,7 +261,7 @@
         }
 
         const bottomVisibleNodes = allMetaNodes.filter(
-          (node) => node.classList.contains("show") && isBottomMetaNode(node)
+          (node) => node.classList.contains("show") && isBottomMetaNode(node),
         );
 
         if (bottomVisibleNodes.length === 0) {
@@ -259,7 +295,10 @@
           }
         }
 
-        stageNode.style.setProperty("--safe-bottom", `${Math.ceil(safeBottomPx)}px`);
+        stageNode.style.setProperty(
+          "--safe-bottom",
+          `${Math.ceil(safeBottomPx)}px`,
+        );
       };
 
       const hideBibleMeta = () => {
@@ -281,12 +320,17 @@
         const version = String(info.version || "").trim();
         const reference = String(info.reference || "").trim();
 
-        const showVersion = style.showBibleVersion !== false && version.length > 0;
-        const showReference = style.showBibleReference !== false && reference.length > 0;
+        const showVersion =
+          style.showBibleVersion !== false && version.length > 0;
+        const showReference =
+          style.showBibleReference !== false && reference.length > 0;
 
         if (showVersion) {
           bibleVersionNode.textContent = version;
-          applyMetaPosition(bibleVersionNode, style.bibleVersionPosition || "top-right");
+          applyMetaPosition(
+            bibleVersionNode,
+            style.bibleVersionPosition || "top-right",
+          );
           bibleVersionNode.classList.add("show");
         } else {
           bibleVersionNode.classList.remove("show");
@@ -295,7 +339,10 @@
 
         if (showReference) {
           bibleReferenceNode.textContent = reference;
-          applyMetaPosition(bibleReferenceNode, style.bibleReferencePosition || "bottom-right");
+          applyMetaPosition(
+            bibleReferenceNode,
+            style.bibleReferencePosition || "bottom-right",
+          );
           bibleReferenceNode.classList.add("show");
         } else {
           bibleReferenceNode.classList.remove("show");
