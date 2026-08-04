@@ -220,6 +220,138 @@ const buildPreviewBackground = (style) => {
   return "linear-gradient(140deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%)";
 };
 
+const joinFieldClasses = (...classes) => classes.filter(Boolean).join(" ");
+
+const FieldLabel = ({ children, className = "", fullWidth = false, inline = false }) => (
+  <label className={joinFieldClasses("field", className, fullWidth && "field-full", inline && "inline")}>
+    {children}
+  </label>
+);
+
+const TextField = ({ label, value, onChange, placeholder, fullWidth = false, className = "", ...props }) => (
+  <FieldLabel fullWidth={fullWidth} className={className}>
+    <span>{label}</span>
+    <input type="text" value={value} onChange={onChange} placeholder={placeholder} {...props} />
+  </FieldLabel>
+);
+
+const NumberField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
+  <FieldLabel fullWidth={fullWidth} className={className}>
+    <span>{label}</span>
+    <input type="number" value={value} onChange={onChange} {...props} />
+  </FieldLabel>
+);
+
+const ColorField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
+  <FieldLabel fullWidth={fullWidth} className={className}>
+    <span>{label}</span>
+    <input type="color" className="custom-color" value={value} onChange={onChange} {...props} />
+  </FieldLabel>
+);
+
+const RangeField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
+  <FieldLabel fullWidth={fullWidth} className={className}>
+    <span>{label}</span>
+    <input type="range" className="custom-range" value={value} onChange={onChange} {...props} />
+  </FieldLabel>
+);
+
+const SelectField = ({ label, value, onChange, children, fullWidth = false, disabled = false, className = "", ...props }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  const options = useMemo(() => {
+    const items = Array.isArray(children) ? children : [children];
+
+    return items
+      .filter(Boolean)
+      .map((child) => ({
+        value: child?.props?.value ?? "",
+        label: child?.props?.children ?? child?.props?.value ?? ""
+      }));
+  }, [children]);
+
+  const selectedOption = options.find((option) => option.value === value) || options[0] || {};
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <FieldLabel fullWidth={fullWidth} className={joinFieldClasses("custom-select-field", className)}>
+      <span>{label}</span>
+      <div className="custom-select-wrapper" ref={wrapperRef}>
+        <button
+          type="button"
+          className={joinFieldClasses("custom-select-trigger", isOpen && "open")}
+          disabled={disabled}
+          aria-expanded={isOpen}
+          onClick={() => !disabled && setIsOpen((prev) => !prev)}
+          {...props}
+        >
+          <span className="custom-select-value">{selectedOption.label || value}</span>
+          <span className="custom-select-arrow" aria-hidden="true" />
+        </button>
+
+        <div className={joinFieldClasses("custom-select-menu", isOpen && "open")}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={joinFieldClasses("custom-select-option", option.value === value && "selected")}
+              onClick={() => {
+                onChange({ target: { value: option.value } });
+                setIsOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </FieldLabel>
+  );
+};
+
+const CheckboxField = ({ label, checked, onChange, inline = false, fullWidth = false, className = "", ...props }) => (
+  <FieldLabel inline={inline} fullWidth={fullWidth} className={joinFieldClasses("custom-checkbox-field", className)}>
+    <span className="custom-checkbox">
+      <input type="checkbox" checked={checked} onChange={onChange} {...props} />
+      <span className="checkbox-indicator" aria-hidden="true" />
+    </span>
+    <span className="checkbox-text">{label}</span>
+  </FieldLabel>
+);
+
+const TextareaField = ({ label, value, onChange, placeholder, fullWidth = false, ...props }) => (
+  <FieldLabel fullWidth={fullWidth}>
+    <span>{label}</span>
+    <textarea value={value} onChange={onChange} placeholder={placeholder} {...props} />
+  </FieldLabel>
+);
+
 function App() {
   const [selectedChannel, setSelectedChannel] = useState("default");
   const [channelDrafts, setChannelDrafts] = useState(createInitialDrafts);
@@ -757,39 +889,34 @@ function App() {
         </p>
 
         <form onSubmit={handleSendSelected} className="editor-grid">
-          <label className="field field-full">
-            Letra atual
-            <textarea
-              rows={7}
-              value={currentDraft.texto}
-              onChange={(event) => handleTextChange(event.target.value)}
-              placeholder="Digite aqui a letra em multiplas linhas"
-            />
-          </label>
+          <TextareaField
+            label="Letra atual"
+            fullWidth
+            rows={7}
+            value={currentDraft.texto}
+            onChange={(event) => handleTextChange(event.target.value)}
+            placeholder="Digite aqui a letra em multiplas linhas"
+          />
 
-          <label className="field">
-            Cor da fonte
-            <input
-              type="color"
+          <div className="style-section field-full">
+            <div className="style-section-title">Texto e fonte</div>
+
+            <ColorField
+              label="Cor da fonte"
               value={currentStyle.color}
               onChange={(event) => handleStyleChange("color", event.target.value)}
             />
-          </label>
 
-          <label className="field">
-            Tamanho da fonte (px)
-            <input
-              type="number"
+            <NumberField
+              label="Tamanho da fonte (px)"
               min={16}
               max={220}
               value={currentStyle.fontSize}
               onChange={(event) => handleStyleChange("fontSize", event.target.value)}
             />
-          </label>
 
-          <label className="field">
-            Fonte
-            <select
+            <SelectField
+              label="Fonte"
               value={getFontSelectValue(currentStyle.fontFamily)}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -805,32 +932,25 @@ function App() {
                   {option.label}
                 </option>
               ))}
-            </select>
-          </label>
+            </SelectField>
 
-          <label className="field">
-            Fonte personalizada
-            <input
-              type="text"
+            <TextField
+              label="Fonte personalizada"
               value={getCustomFontInputValue(currentStyle.fontFamily)}
               onChange={(event) => handleStyleChange("fontFamily", event.target.value)}
               placeholder='Ex: "Poppins", sans-serif'
             />
-          </label>
 
-          <label className="field field-full">
-            URL do Google Fonts
-            <input
-              type="text"
+            <TextField
+              label="URL do Google Fonts"
+              fullWidth
               value={currentStyle.fontImportUrl || ""}
               onChange={(event) => handleStyleChange("fontImportUrl", event.target.value)}
               placeholder='Ex: https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single&display=swap'
             />
-          </label>
 
-          <label className="field">
-            Alinhamento
-            <select
+            <SelectField
+              label="Alinhamento"
               value={currentStyle.textAlign}
               onChange={(event) => handleStyleChange("textAlign", event.target.value)}
             >
@@ -838,67 +958,56 @@ function App() {
               <option value="center">Centro</option>
               <option value="right">Direita</option>
               <option value="justify">Justificado</option>
-            </select>
-          </label>
+            </SelectField>
 
-          <label className="field inline">
-            <input
-              type="checkbox"
+            <CheckboxField
+              label="Sombra ativada"
+              inline
               checked={currentStyle.shadowEnabled}
               onChange={(event) => handleStyleChange("shadowEnabled", event.target.checked)}
             />
-            Sombra ativada
-          </label>
 
-          <label className="field">
-            Intensidade da sombra ({currentStyle.shadowIntensity})
-            <input
-              type="range"
+            <RangeField
+              label={`Intensidade da sombra (${currentStyle.shadowIntensity})`}
               min={0}
               max={100}
               value={currentStyle.shadowIntensity}
               disabled={!currentStyle.shadowEnabled}
               onChange={(event) => handleStyleChange("shadowIntensity", event.target.value)}
             />
-          </label>
+          </div>
 
-          <label className="field">
-            Tipo de background
-            <select
+          <div className="style-section field-full">
+            <div className="style-section-title">Background e aparência</div>
+
+            <SelectField
+              label="Tipo de background"
               value={currentStyle.backgroundMode}
               onChange={(event) => handleStyleChange("backgroundMode", event.target.value)}
             >
               <option value="transparent">Transparente</option>
               <option value="solid">Cor solida</option>
               <option value="gradient">Gradiente</option>
-            </select>
-          </label>
+            </SelectField>
 
-          {currentStyle.backgroundMode === "solid" && (
-            <label className="field">
-              Cor do background
-              <input
-                type="color"
+            {currentStyle.backgroundMode === "solid" && (
+              <ColorField
+                label="Cor do background"
                 value={currentStyle.backgroundColor}
                 onChange={(event) => handleStyleChange("backgroundColor", event.target.value)}
               />
-            </label>
-          )}
+            )}
 
-          {currentStyle.backgroundMode === "gradient" && (
-            <>
-              <label className="field">
-                Cor base do gradiente
-                <input
-                  type="color"
+            {currentStyle.backgroundMode === "gradient" && (
+              <>
+                <ColorField
+                  label="Cor base do gradiente"
                   value={currentStyle.gradientColor}
                   onChange={(event) => handleStyleChange("gradientColor", event.target.value)}
                 />
-              </label>
 
-              <label className="field">
-                Direcao do gradiente
-                <select
+                <SelectField
+                  label="Direcao do gradiente"
                   value={currentStyle.gradientDirection}
                   onChange={(event) => handleStyleChange("gradientDirection", event.target.value)}
                 >
@@ -908,116 +1017,96 @@ function App() {
                   <option value="to right">Esquerda para direita</option>
                   <option value="to left">Direita para esquerda</option>
                   <option value="to bottom">Cima para baixo</option>
-                </select>
-              </label>
+                </SelectField>
 
-              <label className="field">
-                Opacidade inicial ({currentStyle.gradientOpacity}%)
-                <input
-                  type="range"
+                <RangeField
+                  label={`Opacidade inicial (${currentStyle.gradientOpacity}%)`}
                   min={0}
                   max={100}
                   value={currentStyle.gradientOpacity}
                   onChange={(event) => handleStyleChange("gradientOpacity", event.target.value)}
                 />
-              </label>
 
-              <label className="field">
-                Alcance para transparencia ({currentStyle.gradientSpread}%)
-                <input
-                  type="range"
+                <RangeField
+                  label={`Alcance para transparencia (${currentStyle.gradientSpread}%)`}
                   min={15}
                   max={100}
                   value={currentStyle.gradientSpread}
                   onChange={(event) => handleStyleChange("gradientSpread", event.target.value)}
                 />
-              </label>
-            </>
-          )}
+              </>
+            )}
 
-          <label className="field inline">
-            <input
-              type="checkbox"
+            <CheckboxField
+              label="Fade suave na troca de letra"
+              inline
               checked={currentStyle.fade}
               onChange={(event) => handleStyleChange("fade", event.target.checked)}
             />
-            Fade suave na troca de letra
-          </label>
+          </div>
 
           {selectedChannel === "bible" && (
-            <>
-              <label className="field inline">
-                <input
-                  type="checkbox"
-                  checked={currentStyle.showBibleVersion}
-                  onChange={(event) => handleStyleChange("showBibleVersion", event.target.checked)}
-                />
-                Mostrar versao da Biblia
-              </label>
+            <div className="style-section field-full">
+              <div className="style-section-title">Versão e referência bíblica</div>
 
-              <label className="field">
-                Posicao da versao
-                <select
-                  value={currentStyle.bibleVersionPosition}
-                  disabled={!currentStyle.showBibleVersion}
-                  onChange={(event) => handleStyleChange("bibleVersionPosition", event.target.value)}
-                >
-                  {BIBLE_META_POSITIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <CheckboxField
+                label="Mostrar versao da Biblia"
+                inline
+                checked={currentStyle.showBibleVersion}
+                onChange={(event) => handleStyleChange("showBibleVersion", event.target.checked)}
+              />
 
-              <label className="field">
-                Tamanho da versao (px)
-                <input
-                  type="number"
-                  min={14}
-                  max={120}
-                  value={currentStyle.bibleVersionFontSize}
-                  disabled={!currentStyle.showBibleVersion}
-                  onChange={(event) => handleStyleChange("bibleVersionFontSize", event.target.value)}
-                />
-              </label>
+              <SelectField
+                label="Posicao da versao"
+                value={currentStyle.bibleVersionPosition}
+                disabled={!currentStyle.showBibleVersion}
+                onChange={(event) => handleStyleChange("bibleVersionPosition", event.target.value)}
+              >
+                {BIBLE_META_POSITIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SelectField>
 
-              <label className="field inline">
-                <input
-                  type="checkbox"
-                  checked={currentStyle.showBibleReference}
-                  onChange={(event) => handleStyleChange("showBibleReference", event.target.checked)}
-                />
-                Mostrar livro/capitulo/versiculo
-              </label>
+              <NumberField
+                label="Tamanho da versao (px)"
+                min={14}
+                max={120}
+                value={currentStyle.bibleVersionFontSize}
+                disabled={!currentStyle.showBibleVersion}
+                onChange={(event) => handleStyleChange("bibleVersionFontSize", event.target.value)}
+              />
 
-              <label className="field">
-                Posicao da referencia
-                <select
-                  value={currentStyle.bibleReferencePosition}
-                  disabled={!currentStyle.showBibleReference}
-                  onChange={(event) => handleStyleChange("bibleReferencePosition", event.target.value)}
-                >
-                  {BIBLE_META_POSITIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <CheckboxField
+                label="Mostrar livro/capitulo/versiculo"
+                inline
+                checked={currentStyle.showBibleReference}
+                onChange={(event) => handleStyleChange("showBibleReference", event.target.checked)}
+              />
 
-              <label className="field">
-                Tamanho da referencia (px)
-                <input
-                  type="number"
-                  min={16}
-                  max={140}
-                  value={currentStyle.bibleReferenceFontSize}
-                  disabled={!currentStyle.showBibleReference}
-                  onChange={(event) => handleStyleChange("bibleReferenceFontSize", event.target.value)}
-                />
-              </label>
-            </>
+              <SelectField
+                label="Posicao da referencia"
+                value={currentStyle.bibleReferencePosition}
+                disabled={!currentStyle.showBibleReference}
+                onChange={(event) => handleStyleChange("bibleReferencePosition", event.target.value)}
+              >
+                {BIBLE_META_POSITIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SelectField>
+
+              <NumberField
+                label="Tamanho da referencia (px)"
+                min={16}
+                max={140}
+                value={currentStyle.bibleReferenceFontSize}
+                disabled={!currentStyle.showBibleReference}
+                onChange={(event) => handleStyleChange("bibleReferenceFontSize", event.target.value)}
+              />
+            </div>
           )}
 
           <div className="field field-full action-row">
@@ -1100,140 +1189,115 @@ function App() {
         <p className="subtitle">Agrupa a musica em blocos de linhas e junta cada bloco em uma linha.</p>
 
         <form onSubmit={handleLayoutConfigSave} className="inline-form">
-          <label className="field">
-            Agrupar musica a cada
-            <select
-              value={layoutConfig.music.breakEveryLines}
-              onChange={(event) =>
-                setLayoutConfig((prev) => ({
-                  ...prev,
-                  music: {
-                    ...prev.music,
-                    breakEveryLines: Number(event.target.value)
-                  }
-                }))
-              }
-            >
-              <option value={0}>Desativado</option>
-              <option value={2}>2 linhas</option>
-              <option value={3}>3 linhas</option>
-              <option value={4}>4 linhas</option>
-              <option value={5}>5 linhas</option>
-            </select>
-          </label>
+          <SelectField
+            label="Agrupar musica a cada"
+            value={layoutConfig.music.breakEveryLines}
+            onChange={(event) =>
+              setLayoutConfig((prev) => ({
+                ...prev,
+                music: {
+                  ...prev.music,
+                  breakEveryLines: Number(event.target.value)
+                }
+              }))
+            }
+          >
+            <option value={0}>Desativado</option>
+            <option value={2}>2 linhas</option>
+            <option value={3}>3 linhas</option>
+            <option value={4}>4 linhas</option>
+            <option value={5}>5 linhas</option>
+          </SelectField>
 
           <button type="submit">Salvar layout da musica</button>
         </form>
       </section>
 
-      <section className="glass-card compact">
+      <section className="glass-card compact" style={{
+    position: 'relative',
+    zIndex: 1,
+  }}>
         <h2>Integracao Holyrics</h2>
         <p className="subtitle">Configure IP, porta, token e modo de leitura da API.</p>
 
         <form onSubmit={handleHolyricsConfigSave} className="editor-grid">
-          <label className="field">
-            IP / Host
-            <input
-              type="text"
-              value={holyricsConfig.host}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, host: event.target.value }))}
-            />
-          </label>
+          <TextField
+            label="IP / Host"
+            value={holyricsConfig.host}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, host: event.target.value }))}
+          />
 
-          <label className="field">
-            Porta
-            <input
-              type="number"
-              value={holyricsConfig.port}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, port: event.target.value }))}
-            />
-          </label>
+          <NumberField
+            label="Porta"
+            value={holyricsConfig.port}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, port: event.target.value }))}
+          />
 
-          <label className="field field-full">
-            Path da API
-            <input
-              type="text"
-              value={holyricsConfig.path}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, path: event.target.value }))}
-            />
-          </label>
+          <TextField
+            label="Path da API"
+            fullWidth
+            value={holyricsConfig.path}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, path: event.target.value }))}
+          />
 
-          <label className="field">
-            Metodo HTTP
-            <select
-              value={holyricsConfig.method}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, method: event.target.value }))}
-            >
-              <option value="GET">GET</option>
-              <option value="POST">POST</option>
-            </select>
-          </label>
+          <SelectField
+            label="Metodo HTTP"
+            value={holyricsConfig.method}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, method: event.target.value }))}
+          >
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+          </SelectField>
 
-          <label className="field">
-            Token
-            <input
-              type="text"
-              value={holyricsConfig.token}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, token: event.target.value }))}
-            />
-          </label>
+          <TextField
+            label="Token"
+            value={holyricsConfig.token}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, token: event.target.value }))}
+          />
 
-          <label className="field">
-            Header do token
-            <input
-              type="text"
-              value={holyricsConfig.tokenHeader}
-              onChange={(event) =>
-                setHolyricsConfig((prev) => ({ ...prev, tokenHeader: event.target.value }))
-              }
-              placeholder="Authorization"
-            />
-          </label>
+          <TextField
+            label="Header do token"
+            value={holyricsConfig.tokenHeader}
+            onChange={(event) =>
+              setHolyricsConfig((prev) => ({ ...prev, tokenHeader: event.target.value }))
+            }
+            placeholder="Authorization"
+          />
 
-          <label className="field">
-            Campo do texto (path)
-            <input
-              type="text"
-              value={holyricsConfig.textPath}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, textPath: event.target.value }))}
-              placeholder="Ex: map.text"
-            />
-          </label>
+          <TextField
+            label="Campo do texto (path)"
+            value={holyricsConfig.textPath}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, textPath: event.target.value }))}
+            placeholder="Ex: map.text"
+          />
 
-          <label className="field">
-            Intervalo do pull (ms)
-            <input
-              type="number"
-              min={100}
-              max={5000}
-              value={holyricsConfig.pullIntervalMs}
-              onChange={(event) =>
-                setHolyricsConfig((prev) => ({ ...prev, pullIntervalMs: event.target.value }))
-              }
-            />
-          </label>
+          <NumberField
+            label="Intervalo do pull (ms)"
+            min={100}
+            max={5000}
+            value={holyricsConfig.pullIntervalMs}
+            onChange={(event) =>
+              setHolyricsConfig((prev) => ({ ...prev, pullIntervalMs: event.target.value }))
+            }
+          />
 
-          <label className="field">
-            Timeout HTTP (ms)
-            <input
-              type="number"
-              min={500}
-              max={6000}
-              value={holyricsConfig.timeoutMs}
-              onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, timeoutMs: event.target.value }))}
-            />
-          </label>
+          <NumberField
+            label="Timeout HTTP (ms)"
+            min={500}
+            max={6000}
+            value={holyricsConfig.timeoutMs}
+            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, timeoutMs: event.target.value }))}
+          />
 
-          <label className="field inline field-full">
-            <input
-              type="checkbox"
-              checked={holyricsConfig.pullEnabled}
-              onChange={(event) =>
-                setHolyricsConfig((prev) => ({ ...prev, pullEnabled: event.target.checked }))
-              }
-            />
-            Ativar leitura automatica (pull)
-          </label>
+          <CheckboxField
+            label="Ativar leitura automatica (pull)"
+            inline
+            fullWidth
+            checked={holyricsConfig.pullEnabled}
+            onChange={(event) =>
+              setHolyricsConfig((prev) => ({ ...prev, pullEnabled: event.target.checked }))
+            }
+          />
 
           <div className="field field-full action-row">
             <button type="submit">Salvar configuracao Holyrics</button>
