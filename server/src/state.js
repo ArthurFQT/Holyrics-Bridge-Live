@@ -81,6 +81,11 @@ export const getSafeChannel = (channel) => {
 
 export const createInitialState = () => ({
   texto: "",
+  // Texto "cru", antes de qualquer transformacao de layout (ex: agrupamento
+  // de linhas da musica). E a partir dele que o layout e recalculado quando
+  // a configuracao muda - `texto` sempre pode ser derivado de novo a partir
+  // de `textoOriginal`, o inverso nao e verdade.
+  textoOriginal: "",
   estilo: buildRenderStyle(defaultStyle),
   bibleInfo: {
     version: "",
@@ -228,6 +233,16 @@ const normalizeText = (value, fallback = "") => {
 
 export const mergeState = (currentState, input = {}) => {
   const incomingText = normalizeText(input.texto, currentState.texto);
+
+  // Se quem chamou passou `textoOriginal` explicitamente, usa isso. Senao,
+  // se passou `texto` (mesmo sem textoOriginal), assume que o texto bruto e
+  // o mesmo (cobre canais sem transformacao, tipo bible/default). Se nao
+  // passou nem um nem outro (ex: update so de estilo), mantem o valor atual.
+  const incomingTextoOriginal = normalizeText(
+    input.textoOriginal !== undefined ? input.textoOriginal : input.texto,
+    currentState.textoOriginal,
+  );
+
   const incomingStyle = buildRenderStyle({
     ...currentState.estilo,
     ...(input.estilo || {}),
@@ -259,6 +274,7 @@ export const mergeState = (currentState, input = {}) => {
 
   const nextState = {
     texto: incomingText,
+    textoOriginal: incomingTextoOriginal,
     estilo: incomingStyle,
     bibleInfo: incomingBibleInfo,
     type: incomingType,
@@ -268,6 +284,7 @@ export const mergeState = (currentState, input = {}) => {
 
   const changed =
     currentState.texto !== nextState.texto ||
+    currentState.textoOriginal !== nextState.textoOriginal ||
     (currentState.type || "") !== nextState.type ||
     JSON.stringify(currentState.bibleInfo || {}) !==
       JSON.stringify(nextState.bibleInfo || {}) ||

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { io } from "socket.io-client";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
@@ -222,6 +223,34 @@ const buildPreviewBackground = (style) => {
 
 const joinFieldClasses = (...classes) => classes.filter(Boolean).join(" ");
 
+// Wrapper around fetch() that surfaces non-2xx responses as real errors
+// instead of silently parsing whatever body came back (or throwing an
+// opaque "Unexpected token" error when the body isn't JSON at all).
+const fetchJson = async (url, options) => {
+  const response = await fetch(url, options);
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = await response.text();
+    } catch (_error) {
+      // ignore - body may not be readable
+    }
+    throw new Error(`${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`);
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    throw new Error("Resposta do servidor nao e um JSON valido.");
+  }
+};
+
 const FieldLabel = ({ children, className = "", fullWidth = false, inline = false }) => (
   <label className={joinFieldClasses("field", className, fullWidth && "field-full", inline && "inline")}>
     {children}
@@ -256,9 +285,17 @@ const RangeField = ({ label, value, onChange, fullWidth = false, className = "",
   </FieldLabel>
 );
 
+// Custom-styled <select> replacement. The dropdown menu is rendered through
+// a portal straight into document.body and positioned with fixed coords, so
+// it can never get clipped or hidden behind another card's stacking context
+// (which is what all the z-index/isolation hacks in the CSS were working
+// around). Also supports basic keyboard navigation (Arrow keys, Enter, Esc).
 const SelectField = ({ label, value, onChange, children, fullWidth = false, disabled = false, className = "", ...props }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const wrapperRef = useRef(null);
+  const [menuRect, setMenuRect] = useState(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const triggerRef = useRef(null);
+  const menuRef = useRef(null);
 
   const options = useMemo(() => {
     const items = Array.isArray(children) ? children : [children];
@@ -272,6 +309,30 @@ const SelectField = ({ label, value, onChange, children, fullWidth = false, disa
   }, [children]);
 
   const selectedOption = options.find((option) => option.value === value) || options[0] || {};
+  const selectedIndex = options.findIndex((option) => option.value === value);
+
+  const updateMenuRect = useCallback(() => {
+    if (!triggerRef.current) {
+      return;
+    }
+    const rect = triggerRef.current.getBoundingClientRect();
+    setMenuRect({
+      top: rect.bottom + 6,
+      left: rect.left,
+      width: rect.width
+    });
+  }, []);
+
+  const openMenu = useCallback(() => {
+    if (disabled) {
+      return;
+    }
+    updateMenuRect();
+    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    setIsOpen(true);
+  }, [disabled, selectedIndex, updateMenuRect]);
+
+  const closeMenu = useCallback(() => setIsOpen(false), []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -279,58 +340,114 @@ const SelectField = ({ label, value, onChange, children, fullWidth = false, disa
     }
 
     const handlePointerDown = (event) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-        setIsOpen(false);
+      if (triggerRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) {
+        return;
       }
+      closeMenu();
     };
 
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
+    const handleReposition = () => updateMenuRect();
 
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
 
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
     };
-  }, [isOpen]);
+  }, [isOpen, closeMenu, updateMenuRect]);
+
+  useEffect(() => {
+    if (isOpen && menuRef.current) {
+      const highlightedEl = menuRef.current.children[highlightedIndex];
+      highlightedEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isOpen, highlightedIndex]);
+
+  const handleTriggerKeyDown = (event) => {
+    if (disabled) {
+      return;
+    }
+
+    if (!isOpen) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+        event.preventDefault();
+        openMenu();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const option = options[highlightedIndex];
+      if (option) {
+        onChange({ target: { value: option.value } });
+        closeMenu();
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeMenu();
+    }
+  };
 
   return (
     <FieldLabel fullWidth={fullWidth} className={joinFieldClasses("custom-select-field", className)}>
       <span>{label}</span>
-      <div className="custom-select-wrapper" ref={wrapperRef}>
-        <button
-          type="button"
-          className={joinFieldClasses("custom-select-trigger", isOpen && "open")}
-          disabled={disabled}
-          aria-expanded={isOpen}
-          onClick={() => !disabled && setIsOpen((prev) => !prev)}
-          {...props}
-        >
-          <span className="custom-select-value">{selectedOption.label || value}</span>
-          <span className="custom-select-arrow" aria-hidden="true" />
-        </button>
+      <button
+        type="button"
+        ref={triggerRef}
+        className={joinFieldClasses("custom-select-trigger", isOpen && "open")}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => (isOpen ? closeMenu() : openMenu())}
+        onKeyDown={handleTriggerKeyDown}
+        {...props}
+      >
+        <span className="custom-select-value">{selectedOption.label || value}</span>
+        <span className="custom-select-arrow" aria-hidden="true" />
+      </button>
 
-        <div className={joinFieldClasses("custom-select-menu", isOpen && "open")}>
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={joinFieldClasses("custom-select-option", option.value === value && "selected")}
-              onClick={() => {
-                onChange({ target: { value: option.value } });
-                setIsOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {isOpen &&
+        menuRect &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            className="custom-select-menu open"
+            style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
+          >
+            {options.map((option, index) => (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className={joinFieldClasses(
+                  "custom-select-option",
+                  option.value === value && "selected",
+                  index === highlightedIndex && "highlighted"
+                )}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                onClick={() => {
+                  onChange({ target: { value: option.value } });
+                  closeMenu();
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
     </FieldLabel>
   );
 };
@@ -368,6 +485,7 @@ function App() {
     danger: false
   });
   const confirmResolverRef = useRef(null);
+  const socketRef = useRef(null);
 
   const currentDraft = channelDrafts[selectedChannel] || {
     texto: "",
@@ -435,6 +553,10 @@ function App() {
     }));
   }, []);
 
+  // Guarded against re-entrancy: if a confirm dialog is already open and
+  // something tries to open a second one, the first Promise would otherwise
+  // never resolve. Now used sparingly - only for the one genuinely
+  // destructive/broad action (pushing style to every channel at once).
   const confirmAction = useCallback(
     ({
       title = "Confirmar acao",
@@ -442,8 +564,12 @@ function App() {
       confirmLabel = "Confirmar",
       cancelLabel = "Cancelar",
       danger = false
-    }) =>
-      new Promise((resolve) => {
+    }) => {
+      if (confirmResolverRef.current) {
+        return Promise.resolve(false);
+      }
+
+      return new Promise((resolve) => {
         confirmResolverRef.current = resolve;
         setConfirmDialog({
           open: true,
@@ -453,7 +579,8 @@ function App() {
           cancelLabel,
           danger
         });
-      }),
+      });
+    },
     []
   );
 
@@ -487,8 +614,7 @@ function App() {
 
   const loadChannelState = useCallback(
     async (channel) => {
-      const response = await fetch(`${BACKEND_URL}/estado?channel=${channel}`);
-      const data = await response.json();
+      const data = await fetchJson(`${BACKEND_URL}/estado?channel=${channel}`);
 
       updateDraft(channel, (current) => ({
         texto: typeof data?.texto === "string" ? data.texto : current.texto,
@@ -500,19 +626,22 @@ function App() {
     [updateDraft]
   );
 
-  const socket = useMemo(
-    () =>
-      io(BACKEND_URL, {
-        transports: ["websocket"],
-        query: { channel: selectedChannel }
-      }),
-    [selectedChannel]
-  );
-
+  // Socket lifecycle lives in a proper effect (not useMemo, which isn't
+  // meant to host side effects like opening a network connection and isn't
+  // guaranteed to run only once). The connection is still re-established
+  // per channel switch to match how the backend currently reads the
+  // `channel` query param at handshake time - if the backend gains a
+  // `channel:subscribe` event, this can become a single persistent socket
+  // instead of a reconnect per switch.
   useEffect(() => {
+    const socket = io(BACKEND_URL, {
+      transports: ["websocket"],
+      query: { channel: selectedChannel }
+    });
+    socketRef.current = socket;
+
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
-
     const onUpdate = (payload) => {
       updateDraft(selectedChannel, (current) => ({
         texto: typeof payload?.texto === "string" ? payload.texto : current.texto,
@@ -531,8 +660,11 @@ function App() {
       socket.off("disconnect", onDisconnect);
       socket.off("lyrics:update", onUpdate);
       socket.close();
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
     };
-  }, [selectedChannel, socket, updateDraft]);
+  }, [selectedChannel, updateDraft]);
 
   useEffect(
     () => () => {
@@ -561,16 +693,17 @@ function App() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      try {
-        await Promise.all(CHANNELS.map((channel) => loadChannelState(channel.id)));
-      } catch (_error) {
-        setStatus("Falha ao buscar estado inicial dos canais.");
+      const results = await Promise.allSettled(CHANNELS.map((channel) => loadChannelState(channel.id)));
+      const failedChannels = results
+        .map((result, index) => (result.status === "rejected" ? CHANNELS[index].label : null))
+        .filter(Boolean);
+
+      if (failedChannels.length) {
+        setStatus(`Falha ao buscar estado de: ${failedChannels.join(", ")}.`);
       }
 
       try {
-        const response = await fetch(`${BACKEND_URL}/holyrics/config`);
-        const data = await response.json();
-
+        const data = await fetchJson(`${BACKEND_URL}/holyrics/config`);
         if (data?.config) {
           setHolyricsConfig({
             ...initialHolyricsConfig,
@@ -582,9 +715,7 @@ function App() {
       }
 
       try {
-        const response = await fetch(`${BACKEND_URL}/layout/config`);
-        const data = await response.json();
-
+        const data = await fetchJson(`${BACKEND_URL}/layout/config`);
         if (data?.config) {
           setLayoutConfig({
             ...initialLayoutConfig,
@@ -638,16 +769,19 @@ function App() {
       payload.texto = currentDraft.texto;
     }
 
-    if (socket.connected) {
+    const socket = socketRef.current;
+    if (socket?.connected) {
       socket.emit("lyrics:set", payload, (ack) => {
         if (ack?.ok) {
           setStatus(`Atualizado por WebSocket (destino: ${target}).`);
+        } else {
+          setStatus(`Servidor rejeitou a atualizacao (destino: ${target}).`);
         }
       });
       return;
     }
 
-    await fetch(`${BACKEND_URL}/letra`, {
+    await fetchJson(`${BACKEND_URL}/letra`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -660,24 +794,12 @@ function App() {
 
   const handleSendSelected = async (event) => {
     event.preventDefault();
-
-    if (
-      !(await confirmAction({
-        title: "Salvar no canal atual",
-        message: `Deseja salvar texto e estilo no canal ${selectedChannel}?`,
-        confirmLabel: "Salvar"
-      }))
-    ) {
-      setStatus("Operacao cancelada.");
-      return;
-    }
-
     setStatus("Enviando para canal atual...");
 
     try {
       await sendUpdate({ target: selectedChannel, includeText: true });
-    } catch (_error) {
-      setStatus("Falha ao enviar atualizacao para canal atual.");
+    } catch (error) {
+      setStatus(`Falha ao enviar atualizacao para canal atual: ${error.message}`);
     }
   };
 
@@ -698,29 +820,17 @@ function App() {
 
     try {
       await sendUpdate({ target: "all", includeText: false });
-    } catch (_error) {
-      setStatus("Falha ao enviar estilo para todos os canais.");
+    } catch (error) {
+      setStatus(`Falha ao enviar estilo para todos os canais: ${error.message}`);
     }
   };
 
   const handleHolyricsConfigSave = async (event) => {
     event.preventDefault();
-
-    if (
-      !(await confirmAction({
-        title: "Salvar configuracao Holyrics",
-        message: "Deseja salvar as configuracoes do Holyrics?",
-        confirmLabel: "Salvar"
-      }))
-    ) {
-      setStatus("Operacao cancelada.");
-      return;
-    }
-
     setStatus("Salvando configuracao Holyrics...");
 
     try {
-      await fetch(`${BACKEND_URL}/holyrics/config`, {
+      await fetchJson(`${BACKEND_URL}/holyrics/config`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -734,8 +844,8 @@ function App() {
       });
 
       setStatus("Configuracao Holyrics salva.");
-    } catch (_error) {
-      setStatus("Falha ao salvar configuracao Holyrics.");
+    } catch (error) {
+      setStatus(`Falha ao salvar configuracao Holyrics: ${error.message}`);
     }
   };
 
@@ -743,34 +853,22 @@ function App() {
     setStatus("Forcando leitura da API Holyrics...");
 
     try {
-      await fetch(`${BACKEND_URL}/holyrics/pull-now`, {
+      await fetchJson(`${BACKEND_URL}/holyrics/pull-now`, {
         method: "POST"
       });
       setStatus("Leitura Holyrics executada.");
       await loadChannelState(selectedChannel);
-    } catch (_error) {
-      setStatus("Falha ao executar leitura Holyrics.");
+    } catch (error) {
+      setStatus(`Falha ao executar leitura Holyrics: ${error.message}`);
     }
   };
 
   const handleLayoutConfigSave = async (event) => {
     event.preventDefault();
-
-    if (
-      !(await confirmAction({
-        title: "Salvar layout da musica",
-        message: "Deseja salvar a configuracao de layout da musica?",
-        confirmLabel: "Salvar"
-      }))
-    ) {
-      setStatus("Operacao cancelada.");
-      return;
-    }
-
     setStatus("Salvando quebra de linha da musica...");
 
     try {
-      await fetch(`${BACKEND_URL}/layout/config`, {
+      await fetchJson(`${BACKEND_URL}/layout/config`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -783,23 +881,12 @@ function App() {
       });
       setStatus("Layout da musica atualizado.");
       await loadChannelState("music");
-    } catch (_error) {
-      setStatus("Falha ao salvar configuracao de layout da musica.");
+    } catch (error) {
+      setStatus(`Falha ao salvar configuracao de layout da musica: ${error.message}`);
     }
   };
 
-  const applyBibleGradientPreset = async () => {
-    if (
-      !(await confirmAction({
-        title: "Preset da Biblia",
-        message: "Deseja aplicar o preset da Biblia no canal Biblia?",
-        confirmLabel: "Aplicar"
-      }))
-    ) {
-      setStatus("Operacao cancelada.");
-      return;
-    }
-
+  const applyBibleGradientPreset = () => {
     setSelectedChannel("bible");
     updateDraft("bible", (current) => ({
       style: {
@@ -817,18 +904,7 @@ function App() {
     setStatus("Preset de Biblia aplicado no canal Biblia.");
   };
 
-  const applyMusicPreset = async () => {
-    if (
-      !(await confirmAction({
-        title: "Preset da Musica",
-        message: "Deseja aplicar o preset de Musica no canal Musica?",
-        confirmLabel: "Aplicar"
-      }))
-    ) {
-      setStatus("Operacao cancelada.");
-      return;
-    }
-
+  const applyMusicPreset = () => {
     setSelectedChannel("music");
     updateDraft("music", (current) => ({
       style: {
@@ -1213,10 +1289,7 @@ function App() {
         </form>
       </section>
 
-      <section className="glass-card compact" style={{
-    position: 'relative',
-    zIndex: 1,
-  }}>
+      <section className="glass-card compact">
         <h2>Integracao Holyrics</h2>
         <p className="subtitle">Configure IP, porta, token e modo de leitura da API.</p>
 

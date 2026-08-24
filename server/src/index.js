@@ -13,7 +13,7 @@ import {
   extractBibleInfo,
   normalizeBibleContent,
   sanitizeHolyricsText,
-  startHolyricsPull
+  startHolyricsPull,
 } from "./holyricsClient.js";
 import {
   CHANNELS,
@@ -22,11 +22,19 @@ import {
   mergeState,
   resolveHolyricsChannel,
   sanitizeHolyricsConfig,
-  toClientPayload
+  toClientPayload,
 } from "./state.js";
 
 const app = express();
 const server = http.createServer(app);
+
+// Envolve um handler async para que rejeicoes de Promise (ex: erro dentro
+// de um `await`) cheguem no error handler do Express em vez de virarem uma
+// unhandled rejection silenciosa que derruba a resposta HTTP sem nunca
+// responder ao cliente.
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
 const parsePanelOrigin = (value) => {
   const raw = String(value || "*").trim();
@@ -48,22 +56,25 @@ const parsePanelOrigin = (value) => {
 
 const io = new Server(server, {
   cors: {
-    origin: parsePanelOrigin(process.env.PANEL_ORIGIN)
+    origin: parsePanelOrigin(process.env.PANEL_ORIGIN),
   },
-  transports: ["websocket"]
+  transports: ["websocket"],
 });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const runtimeConfigPath = path.resolve(__dirname, "../data/runtime-config.json");
+const runtimeConfigPath = path.resolve(
+  __dirname,
+  "../data/runtime-config.json",
+);
 
 let channelStates = createInitialChannelStates();
 let holyricsRunner;
 let lastHolyricsContentChannel = null;
 let layoutConfig = {
   music: {
-    breakEveryLines: 0
-  }
+    breakEveryLines: 0,
+  },
 };
 const holyricsDiagnostics = {
   lastAttemptAt: null,
@@ -73,7 +84,7 @@ const holyricsDiagnostics = {
   lastTextLength: 0,
   lastResponsePreview: null,
   lastType: null,
-  lastChannel: null
+  lastChannel: null,
 };
 
 let holyricsConfig = sanitizeHolyricsConfig({
@@ -86,7 +97,7 @@ let holyricsConfig = sanitizeHolyricsConfig({
   textPath: process.env.HOLYRICS_TEXT_PATH,
   pullEnabled: process.env.HOLYRICS_PULL_ENABLED === "true",
   pullIntervalMs: process.env.HOLYRICS_PULL_INTERVAL_MS,
-  timeoutMs: process.env.HOLYRICS_TIMEOUT_MS
+  timeoutMs: process.env.HOLYRICS_TIMEOUT_MS,
 });
 
 let persistRuntimeConfigTimer;
@@ -98,16 +109,20 @@ const buildPersistedRuntimeConfig = () => ({
   styles: {
     [CHANNELS.DEFAULT]: channelStates[CHANNELS.DEFAULT]?.estilo || {},
     [CHANNELS.MUSIC]: channelStates[CHANNELS.MUSIC]?.estilo || {},
-    [CHANNELS.BIBLE]: channelStates[CHANNELS.BIBLE]?.estilo || {}
+    [CHANNELS.BIBLE]: channelStates[CHANNELS.BIBLE]?.estilo || {},
   },
   layoutConfig,
-  holyricsConfig
+  holyricsConfig,
 });
 
 const persistRuntimeConfigNow = async () => {
   const payload = buildPersistedRuntimeConfig();
   await fs.mkdir(path.dirname(runtimeConfigPath), { recursive: true });
-  await fs.writeFile(runtimeConfigPath, JSON.stringify(payload, null, 2), "utf8");
+  await fs.writeFile(
+    runtimeConfigPath,
+    JSON.stringify(payload, null, 2),
+    "utf8",
+  );
 };
 
 const schedulePersistRuntimeConfig = () => {
@@ -117,7 +132,9 @@ const schedulePersistRuntimeConfig = () => {
 
   persistRuntimeConfigTimer = setTimeout(() => {
     persistRuntimeConfigNow().catch((error) => {
-      console.warn(`[runtime-config] Falha ao salvar configuracao: ${error.message}`);
+      console.warn(
+        `[runtime-config] Falha ao salvar configuracao: ${error.message}`,
+      );
     });
   }, 180);
 };
@@ -129,7 +146,9 @@ const loadPersistedRuntimeConfig = async () => {
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch (error) {
     if (error?.code !== "ENOENT") {
-      console.warn(`[runtime-config] Falha ao carregar configuracao: ${error.message}`);
+      console.warn(
+        `[runtime-config] Falha ao carregar configuracao: ${error.message}`,
+      );
     }
     return null;
   }
@@ -143,14 +162,17 @@ const applyPersistedRuntimeConfig = (persisted) => {
   if (persisted.layoutConfig && typeof persisted.layoutConfig === "object") {
     layoutConfig = sanitizeLayoutConfig({
       ...layoutConfig,
-      ...persisted.layoutConfig
+      ...persisted.layoutConfig,
     });
   }
 
-  if (persisted.holyricsConfig && typeof persisted.holyricsConfig === "object") {
+  if (
+    persisted.holyricsConfig &&
+    typeof persisted.holyricsConfig === "object"
+  ) {
     holyricsConfig = sanitizeHolyricsConfig({
       ...holyricsConfig,
-      ...persisted.holyricsConfig
+      ...persisted.holyricsConfig,
     });
   }
 
@@ -166,12 +188,12 @@ const applyPersistedRuntimeConfig = (persisted) => {
 
       const { state } = mergeState(nextStates[channel], {
         estilo: persistedStyle,
-        source: "runtime-config:load"
+        source: "runtime-config:load",
       });
 
       nextStates = {
         ...nextStates,
-        [channel]: state
+        [channel]: state,
       };
     }
 
@@ -179,7 +201,9 @@ const applyPersistedRuntimeConfig = (persisted) => {
   }
 
   if (typeof persisted.lastHolyricsContentChannel === "string") {
-    lastHolyricsContentChannel = getSafeChannel(persisted.lastHolyricsContentChannel);
+    lastHolyricsContentChannel = getSafeChannel(
+      persisted.lastHolyricsContentChannel,
+    );
   }
 };
 
@@ -193,8 +217,8 @@ const clampMusicBreakLines = (value) => {
 
 const sanitizeLayoutConfig = (input) => ({
   music: {
-    breakEveryLines: clampMusicBreakLines(input?.music?.breakEveryLines)
-  }
+    breakEveryLines: clampMusicBreakLines(input?.music?.breakEveryLines),
+  },
 });
 
 const applyMusicLineBreak = (text, breakEveryLines) => {
@@ -251,7 +275,10 @@ const roomFor = (channel) => `channel:${getSafeChannel(channel)}`;
 const emitState = (channel) => {
   const safeChannel = getSafeChannel(channel);
   const state = channelStates[safeChannel];
-  io.to(roomFor(safeChannel)).emit("lyrics:update", toClientPayload(state, safeChannel));
+  io.to(roomFor(safeChannel)).emit(
+    "lyrics:update",
+    toClientPayload(state, safeChannel),
+  );
 };
 
 const resolveBibleInfoForChannel = (channel, bibleInfo) => {
@@ -262,20 +289,28 @@ const resolveBibleInfoForChannel = (channel, bibleInfo) => {
   return bibleInfo || undefined;
 };
 
+// `texto` aqui e sempre o texto BRUTO (antes de qualquer transformacao de
+// layout) - a transformacao acontece uma unica vez, aqui dentro, e o
+// resultado (`transformedText`) e o que vira `estado.texto`. O texto bruto
+// em si e preservado como `textoOriginal` no state, para poder ser
+// reprocessado do zero quando a configuracao de layout mudar (ver
+// /layout/config mais abaixo). Nunca passe um texto ja transformado para
+// `texto` aqui, ou ele sera transformado de novo (dobrando o agrupamento).
 const applyUpdate = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   const safeChannel = getSafeChannel(channel);
   const transformedText = transformTextByChannel(texto, safeChannel);
   const currentState = channelStates[safeChannel];
   const { changed, state } = mergeState(currentState, {
     texto: transformedText,
+    textoOriginal: texto,
     estilo,
     source,
     bibleInfo: resolveBibleInfoForChannel(safeChannel, bibleInfo),
-    type
+    type,
   });
   channelStates = {
     ...channelStates,
-    [safeChannel]: state
+    [safeChannel]: state,
   };
 
   if (changed) {
@@ -285,11 +320,18 @@ const applyUpdate = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   return {
     changed,
     channel: safeChannel,
-    state
+    state,
   };
 };
 
-const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo, type }) => {
+const mirrorToDefault = ({
+  texto,
+  estilo,
+  source,
+  channel,
+  bibleInfo,
+  type,
+}) => {
   if (channel === CHANNELS.DEFAULT) {
     return;
   }
@@ -300,17 +342,31 @@ const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo, type }) =>
     source: `${source}:default-mirror`,
     channel: CHANNELS.DEFAULT,
     bibleInfo: channel === CHANNELS.BIBLE ? bibleInfo : null,
-    type
+    type,
   });
 };
 
-const applyUpdateMany = ({ texto, estilo, source, channels, bibleInfo, type }) => {
+const applyUpdateMany = ({
+  texto,
+  estilo,
+  source,
+  channels,
+  bibleInfo,
+  type,
+}) => {
   const targetChannels = (channels || [CHANNELS.DEFAULT]).map(getSafeChannel);
   const uniqueChannels = [...new Set(targetChannels)];
   const results = [];
 
   for (const channel of uniqueChannels) {
-    const result = applyUpdate({ texto, estilo, source, channel, bibleInfo, type });
+    const result = applyUpdate({
+      texto,
+      estilo,
+      source,
+      channel,
+      bibleInfo,
+      type,
+    });
     results.push(result);
     mirrorToDefault({ texto, estilo, source, channel, bibleInfo, type });
   }
@@ -322,7 +378,11 @@ const resolveIncomingHolyricsChannel = ({ type, text }) => {
   const resolvedChannel = resolveHolyricsChannel(type);
   const isEmptyText = String(text || "").trim().length === 0;
 
-  if (resolvedChannel === CHANNELS.DEFAULT && isEmptyText && lastHolyricsContentChannel) {
+  if (
+    resolvedChannel === CHANNELS.DEFAULT &&
+    isEmptyText &&
+    lastHolyricsContentChannel
+  ) {
     return lastHolyricsContentChannel;
   }
 
@@ -336,8 +396,20 @@ const restartHolyricsPull = () => {
     config: holyricsConfig,
     onLyric: ({ text, type, bibleInfo, raw }) => {
       const holyricsChannel = resolveIncomingHolyricsChannel({ type, text });
-      applyUpdate({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo, type });
-      mirrorToDefault({ texto: text, source: "holyrics-pull", channel: holyricsChannel, bibleInfo, type });
+      applyUpdate({
+        texto: text,
+        source: "holyrics-pull",
+        channel: holyricsChannel,
+        bibleInfo,
+        type,
+      });
+      mirrorToDefault({
+        texto: text,
+        source: "holyrics-pull",
+        channel: holyricsChannel,
+        bibleInfo,
+        type,
+      });
 
       if (holyricsChannel !== CHANNELS.DEFAULT) {
         lastHolyricsContentChannel = holyricsChannel;
@@ -349,7 +421,10 @@ const restartHolyricsPull = () => {
       holyricsDiagnostics.lastType = type || null;
       holyricsDiagnostics.lastChannel = holyricsChannel;
       try {
-        holyricsDiagnostics.lastResponsePreview = JSON.stringify(raw).slice(0, 400);
+        holyricsDiagnostics.lastResponsePreview = JSON.stringify(raw).slice(
+          0,
+          400,
+        );
       } catch (_error) {
         holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
       }
@@ -357,14 +432,16 @@ const restartHolyricsPull = () => {
     onError: (error) => {
       holyricsDiagnostics.lastError = error?.message || "Erro desconhecido";
     },
-    logger: console
+    logger: console,
   });
 };
 
 const persistedRuntimeConfig = await loadPersistedRuntimeConfig();
 if (persistedRuntimeConfig) {
   applyPersistedRuntimeConfig(persistedRuntimeConfig);
-  console.info(`[runtime-config] Configuracao carregada de ${runtimeConfigPath}`);
+  console.info(
+    `[runtime-config] Configuracao carregada de ${runtimeConfigPath}`,
+  );
 }
 
 restartHolyricsPull();
@@ -374,7 +451,10 @@ io.on("connection", (socket) => {
   const room = roomFor(requestedChannel);
   socket.join(room);
 
-  socket.emit("lyrics:update", toClientPayload(channelStates[requestedChannel], requestedChannel));
+  socket.emit(
+    "lyrics:update",
+    toClientPayload(channelStates[requestedChannel], requestedChannel),
+  );
 
   socket.on("lyrics:set", (payload, ack) => {
     const target = String(payload?.target || "default").toLowerCase();
@@ -388,7 +468,7 @@ io.on("connection", (socket) => {
       texto: payload?.texto,
       estilo: payload?.estilo,
       source: "socket-panel",
-      channels
+      channels,
     });
 
     if (payload?.estilo && results.some((item) => item.changed)) {
@@ -396,7 +476,11 @@ io.on("connection", (socket) => {
     }
 
     if (typeof ack === "function") {
-      ack({ ok: true, changed: results.some((item) => item.changed), channels });
+      ack({
+        ok: true,
+        changed: results.some((item) => item.changed),
+        channels,
+      });
     }
   });
 });
@@ -414,12 +498,14 @@ app.get("/estado/all", (_req, res) => {
   res.json({
     default: toClientPayload(channelStates[CHANNELS.DEFAULT], CHANNELS.DEFAULT),
     music: toClientPayload(channelStates[CHANNELS.MUSIC], CHANNELS.MUSIC),
-    bible: toClientPayload(channelStates[CHANNELS.BIBLE], CHANNELS.BIBLE)
+    bible: toClientPayload(channelStates[CHANNELS.BIBLE], CHANNELS.BIBLE),
   });
 });
 
 app.post("/letra", (req, res) => {
-  const target = String(req.body?.target || req.body?.channel || "default").toLowerCase();
+  const target = String(
+    req.body?.target || req.body?.channel || "default",
+  ).toLowerCase();
 
   const channels =
     target === "all"
@@ -430,7 +516,7 @@ app.post("/letra", (req, res) => {
     texto: req.body?.texto,
     estilo: req.body?.estilo,
     source: "http-post",
-    channels
+    channels,
   });
 
   if (req.body?.estilo && results.some((item) => item.changed)) {
@@ -441,7 +527,9 @@ app.post("/letra", (req, res) => {
     ok: true,
     changed: results.some((item) => item.changed),
     channels,
-    state: channels.map((channel) => toClientPayload(channelStates[channel], channel))
+    state: channels.map((channel) =>
+      toClientPayload(channelStates[channel], channel),
+    ),
   });
 });
 
@@ -458,7 +546,7 @@ app.post("/holyrics/webhook", (req, res) => {
     req.body?.type || req.body?.current?.type || req.body?.slide?.type || "";
   const channel = resolveIncomingHolyricsChannel({
     type: holyricsType,
-    text: texto
+    text: texto,
   });
 
   const extractedBibleInfo = extractBibleInfo(req.body || {});
@@ -467,25 +555,25 @@ app.post("/holyrics/webhook", (req, res) => {
     channel === CHANNELS.BIBLE
       ? normalizeBibleContent({
           text: sanitizedTexto,
-          bibleInfo: extractedBibleInfo
+          bibleInfo: extractedBibleInfo,
         })
       : {
           text: sanitizedTexto,
-          bibleInfo: extractedBibleInfo
+          bibleInfo: extractedBibleInfo,
         };
   const result = applyUpdate({
     texto: normalizedBible.text,
     source: "holyrics-webhook",
     channel,
     bibleInfo: normalizedBible.bibleInfo,
-    type: holyricsType
+    type: holyricsType,
   });
   mirrorToDefault({
     texto: normalizedBible.text,
     source: "holyrics-webhook",
     channel,
     bibleInfo: normalizedBible.bibleInfo,
-    type: holyricsType
+    type: holyricsType,
   });
 
   if (channel !== CHANNELS.DEFAULT) {
@@ -498,28 +586,28 @@ app.post("/holyrics/webhook", (req, res) => {
 app.get("/holyrics/config", (_req, res) => {
   res.json({
     ok: true,
-    config: holyricsConfig
+    config: holyricsConfig,
   });
 });
 
 app.get("/layout/config", (_req, res) => {
   res.json({
     ok: true,
-    config: layoutConfig
+    config: layoutConfig,
   });
 });
 
 app.get("/holyrics/diagnostics", (_req, res) => {
   res.json({
     ok: true,
-    diagnostics: holyricsDiagnostics
+    diagnostics: holyricsDiagnostics,
   });
 });
 
 app.post("/holyrics/config", (req, res) => {
   holyricsConfig = sanitizeHolyricsConfig({
     ...holyricsConfig,
-    ...(req.body || {})
+    ...(req.body || {}),
   });
 
   restartHolyricsPull();
@@ -527,33 +615,39 @@ app.post("/holyrics/config", (req, res) => {
 
   res.json({
     ok: true,
-    config: holyricsConfig
+    config: holyricsConfig,
   });
 });
 
 app.post("/layout/config", (req, res) => {
   layoutConfig = sanitizeLayoutConfig({
     ...layoutConfig,
-    ...(req.body || {})
+    ...(req.body || {}),
   });
 
   const musicCurrent = channelStates[CHANNELS.MUSIC];
-  const musicReformatted = transformTextByChannel(musicCurrent.texto, CHANNELS.MUSIC);
+  // Reprocessa sempre a partir do texto BRUTO (pre-agrupamento), nunca do
+  // `texto` ja transformado - senao cada troca de "agrupar a cada N linhas"
+  // reagrupa um texto que ja tinha sido agrupado antes, degradando o
+  // resultado a cada mudanca. `applyUpdate` ja aplica a transformacao
+  // internamente, entao passamos o texto bruto direto para ele.
+  const musicRawText = musicCurrent.textoOriginal ?? musicCurrent.texto;
+
   const musicChanged = applyUpdate({
-    texto: musicReformatted,
+    texto: musicRawText,
     estilo: musicCurrent.estilo,
     source: "layout-config",
     channel: CHANNELS.MUSIC,
-    type: musicCurrent.type
+    type: musicCurrent.type,
   });
 
   if (musicChanged.changed) {
     mirrorToDefault({
-      texto: channelStates[CHANNELS.MUSIC].texto,
+      texto: channelStates[CHANNELS.MUSIC].textoOriginal,
       estilo: channelStates[CHANNELS.MUSIC].estilo,
       source: "layout-config",
       channel: CHANNELS.MUSIC,
-      type: channelStates[CHANNELS.MUSIC].type
+      type: channelStates[CHANNELS.MUSIC].type,
     });
   }
 
@@ -561,52 +655,80 @@ app.post("/layout/config", (req, res) => {
 
   res.json({
     ok: true,
-    config: layoutConfig
+    config: layoutConfig,
   });
 });
 
-app.post("/holyrics/pull-now", async (_req, res) => {
-  if (!holyricsRunner) {
-    return res.status(503).json({ ok: false, message: "Integracao Holyrics indisponivel." });
-  }
-
-  holyricsDiagnostics.lastAttemptAt = new Date().toISOString();
-  const result = await holyricsRunner.fetchNow();
-
-  if (result?.url) {
-    holyricsDiagnostics.lastUrl = result.url;
-  }
-
-  if (result?.ok) {
-    holyricsDiagnostics.lastError = null;
-  }
-
-  if (result?.type) {
-    holyricsDiagnostics.lastType = result.type;
-    holyricsDiagnostics.lastChannel = resolveHolyricsChannel(result.type);
-  }
-
-  if (result?.responseData !== undefined) {
-    try {
-      holyricsDiagnostics.lastResponsePreview = JSON.stringify(result.responseData).slice(0, 400);
-    } catch (_error) {
-      holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
+app.post(
+  "/holyrics/pull-now",
+  asyncHandler(async (_req, res) => {
+    if (!holyricsRunner) {
+      return res
+        .status(503)
+        .json({ ok: false, message: "Integracao Holyrics indisponivel." });
     }
-  }
 
-  if (!result?.ok && result?.error) {
-    holyricsDiagnostics.lastError = result.error;
-  }
+    holyricsDiagnostics.lastAttemptAt = new Date().toISOString();
+    const result = await holyricsRunner.fetchNow();
 
-  return res.json({ ok: true, result, diagnostics: holyricsDiagnostics });
+    if (result?.url) {
+      holyricsDiagnostics.lastUrl = result.url;
+    }
+
+    if (result?.ok) {
+      holyricsDiagnostics.lastError = null;
+    }
+
+    if (result?.type) {
+      holyricsDiagnostics.lastType = result.type;
+      holyricsDiagnostics.lastChannel = resolveHolyricsChannel(result.type);
+    }
+
+    if (result?.responseData !== undefined) {
+      try {
+        holyricsDiagnostics.lastResponsePreview = JSON.stringify(
+          result.responseData,
+        ).slice(0, 400);
+      } catch (_error) {
+        holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
+      }
+    }
+
+    if (!result?.ok && result?.error) {
+      holyricsDiagnostics.lastError = result.error;
+    }
+
+    return res.json({ ok: true, result, diagnostics: holyricsDiagnostics });
+  }),
+);
+
+// Qualquer rota nao encontrada volta como JSON (nao a pagina HTML padrao do
+// Express), para nao quebrar clientes que sempre esperam `response.json()`.
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    message: `Rota nao encontrada: ${req.method} ${req.path}`,
+  });
+});
+
+// Precisa ser o ULTIMO middleware registrado. Captura qualquer erro lancado
+// (sincrono) ou encaminhado via `next(err)`/asyncHandler (assincrono) e
+// responde em JSON com status 500, em vez de deixar o Express cair no
+// handler padrao dele, que responde com uma pagina HTML.
+app.use((err, _req, res, _next) => {
+  console.error("[server] Erro nao tratado:", err);
+  res.status(500).json({ ok: false, message: err?.message || "Erro interno." });
 });
 
 const port = Number(process.env.PORT) || 3001;
 const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 
 const resolveServerUrls = (listenHost, listenPort) => {
-  const normalizedHost = String(listenHost || "").trim().toLowerCase();
-  const onAllInterfaces = normalizedHost === "0.0.0.0" || normalizedHost === "::";
+  const normalizedHost = String(listenHost || "")
+    .trim()
+    .toLowerCase();
+  const onAllInterfaces =
+    normalizedHost === "0.0.0.0" || normalizedHost === "::";
   const urls = new Set();
 
   if (onAllInterfaces) {
@@ -630,7 +752,7 @@ const resolveServerUrls = (listenHost, listenPort) => {
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
     console.error(
-      `[server] ${host}:${port} ja esta em uso. Encerre o processo antigo ou altere HOST/PORT no .env.`
+      `[server] ${host}:${port} ja esta em uso. Encerre o processo antigo ou altere HOST/PORT no .env.`,
     );
     return;
   }
