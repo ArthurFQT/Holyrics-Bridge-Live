@@ -1,4 +1,4 @@
-﻿# Holyrics -> vMix (tempo real)
+# Holyrics -> vMix (tempo real)
 
 Sistema local de exibicao de letras em tempo real para uso com Browser Input do vMix.
 
@@ -25,18 +25,22 @@ npm run dev
 ```
 
 2. Abra o painel:
+
 - `http://localhost:5173`
 
 3. Abra no vMix os Browser Inputs:
+
 - musica: `http://localhost:3001/display/music`
 - biblia: `http://localhost:3001/display/bible`
 
 4. No painel, ajuste:
+
 - integracao Holyrics (`/view/text.json`, `map.text`, etc.)
 - estilo visual
 - destino (`music`, `bible`, `default`, `all`)
 
 5. Use o Holyrics normalmente:
+
 - o backend detecta `type` e envia para o canal correto em tempo real.
 
 ## Estrutura
@@ -44,6 +48,10 @@ npm run dev
 - `server`: Express + Socket.IO (websocket-only)
 - `control-panel`: Painel React para texto e estilo
 - `server/public/display`: Pagina leve de exibicao com fundo transparente
+
+Para cenarios de instalacao com Holyrics/vMix/painel em maquinas diferentes,
+descoberta de IP na rede, e troubleshooting (firewall, porta ocupada, CORS,
+etc), veja o [Guia de cenarios reais](docs/guia-cenarios-reais.md).
 
 ## Canais (separacao Musica/Biblia)
 
@@ -185,6 +193,13 @@ Aceita `texto`, `text`, `lyric`, `current.texto`, `current.text` e usa `type` pa
 - `POST /holyrics/pull-now` (forcar leitura imediata)
 - `GET /holyrics/diagnostics`
 
+### Persistencia da configuracao
+
+- `GET /runtime-config/status`: informa se a configuracao ativa veio do arquivo (`file`), do backup (`backup`) ou dos valores padrao (`defaults`), alem de um aviso quando algo precisou ser recuperado.
+- `POST /runtime-config/reset`: restaura estilos, layout e configuracao do Holyrics para os valores padrao e salva imediatamente. Use quando a configuracao estiver corrompida ou confusa.
+
+O backend guarda a configuracao em `server/data/runtime-config.json`, com um backup automatico (`runtime-config.backup.json`) atualizado antes de cada gravacao e escrita atomica (arquivo temporario + rename) para reduzir o risco de corrupcao numa queda de energia ou encerramento abrupto. Se o arquivo principal estiver corrompido, o servidor tenta o backup antes de cair nos valores padrao, e o painel mostra um aviso quando isso acontece.
+
 ## Exemplo de integracao com Holyrics via API
 
 Configuracao recomendada para Holyrics WebService Plugin:
@@ -210,8 +225,10 @@ Se sua API devolver texto em outro caminho, ajuste `textPath`.
 
 1. Abra o `Browser Input` para cada camada desejada.
 2. Use uma URL por camada:
+
 - musica: `http://localhost:3001/display/music`
 - biblia: `http://localhost:3001/display/bible`
+
 3. Ative transparencia no Browser Input (alpha channel).
 4. Controle texto/estilo pelo painel em `http://localhost:5173`.
 
@@ -220,3 +237,11 @@ Se sua API devolver texto em outro caminho, ajuste `textPath`.
 - Socket.IO em `transports: ["websocket"]` (sem fallback polling).
 - Display aplica atualizacoes sem reload.
 - Estado em memoria para minimizar overhead.
+
+## Codificacao de arquivos
+
+Salve sempre como **UTF-8 sem BOM** (`.js`, `.jsx`, `.css`, `.html`, `.md`). O
+`.editorconfig` na raiz ja configura isso para editores compativeis (VS Code,
+JetBrains, etc). Arquivos com BOM ainda funcionam, mas podem confundir
+ferramentas de linha de comando (ex: o primeiro padrao de um `.gitignore` com
+BOM pode nao ser reconhecido).
