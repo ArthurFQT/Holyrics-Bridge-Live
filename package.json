@@ -2,6 +2,7 @@
   "name": "holyrics-to-vmix",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "workspaces": [
     "server",
     "control-panel"
@@ -11,9 +12,20 @@
     "dev:server": "npm --workspace server run dev",
     "dev:panel": "npm --workspace control-panel run dev",
     "build": "npm --workspace control-panel run build",
-    "start": "npm --workspace server run start"
+    "start": "npm --workspace server run start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && npm run build"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@eslint/js": "^9.39.5",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.6"
   }
 }

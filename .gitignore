@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 **/node_modules/
 dist/
 .env
@@ -6,4 +6,6 @@ server/.env
 control-panel/.env
 npm-debug.log*
 server/data/runtime-config.json
+server/data/runtime-config.backup.json
+server/data/runtime-config.json.tmp
 .claude
