@@ -1,473 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+
+import { CHANNELS } from "./constants/channels";
+import {
+  createEmptyDraft,
+  createInitialDrafts,
+  initialHolyricsConfig,
+  initialLayoutConfig,
+} from "./constants/defaults";
+import ChannelEditor from "./components/ChannelEditor";
+import ConfirmDialog from "./components/ConfirmDialog";
+import HolyricsConfigForm from "./components/HolyricsConfigForm";
+import HolyricsDiagnostics from "./components/HolyricsDiagnostics";
+import MusicLayoutForm from "./components/MusicLayoutForm";
+import PresetManager from "./components/PresetManager";
+import VMixUrls from "./components/VMixUrls";
+import { parseBibleInfo, parseType } from "./utils/bibleInfo";
+import { fetchJson } from "./utils/fetchJson";
+import { buildStylePayload, ensureGoogleFontImport, parseServerStyle } from "./utils/style";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 
-const CHANNELS = [
-  { id: "default", label: "Default" },
-  { id: "music", label: "Musica" },
-  { id: "bible", label: "Biblia" }
-];
-
-const BIBLE_META_POSITIONS = [
-  { value: "top-left", label: "Topo esquerdo" },
-  { value: "top-center", label: "Topo centro" },
-  { value: "top-right", label: "Topo direito" },
-  { value: "bottom-left", label: "Rodape esquerdo" },
-  { value: "bottom-center", label: "Rodape centro" },
-  { value: "bottom-right", label: "Rodape direito" }
-];
-
-const FONT_OPTIONS = [
-  { value: '"Manrope", "Segoe UI", sans-serif', label: "Manrope" },
-  { value: '"Sora", "Manrope", sans-serif', label: "Sora" },
-  { value: '"Montserrat", "Arial", sans-serif', label: "Montserrat" },
-  { value: '"Poppins", "Arial", sans-serif', label: "Poppins" },
-  { value: '"Inter", "Segoe UI", sans-serif', label: "Inter" },
-  { value: '"Roboto", "Arial", sans-serif', label: "Roboto" },
-  { value: "Arial, sans-serif", label: "Arial" },
-  { value: "Georgia, serif", label: "Georgia" },
-  { value: '"Times New Roman", serif', label: "Times New Roman" },
-  { value: "custom", label: "Personalizada" }
-];
-
-const FONT_FALLBACKS = {
-  "Montserrat, sans-serif": '"Montserrat", "Arial", sans-serif',
-  "Poppins, sans-serif": '"Poppins", "Arial", sans-serif',
-  "Inter, sans-serif": '"Inter", "Segoe UI", sans-serif',
-  "Roboto, sans-serif": '"Roboto", "Arial", sans-serif',
-  "Sora, sans-serif": '"Sora", "Manrope", sans-serif',
-  "Manrope, sans-serif": '"Manrope", "Segoe UI", sans-serif'
+const initialDiagnostics = {
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastError: null,
+  lastUrl: null,
+  lastTextLength: 0,
+  lastResponsePreview: null,
+  lastType: null,
+  lastChannel: null,
 };
-
-const initialStyle = {
-  color: "#ffffff",
-  fontSize: 72,
-  fontFamily: '"Manrope", "Segoe UI", sans-serif',
-  fontImportUrl: "",
-  textAlign: "center",
-  shadowEnabled: true,
-  shadowIntensity: 65,
-  backgroundMode: "transparent",
-  backgroundTransparent: true,
-  backgroundColor: "#000000",
-  gradientColor: "#000000",
-  gradientOpacity: 78,
-  gradientSpread: 68,
-  gradientDirection: "to top right",
-  showBibleVersion: true,
-  showBibleReference: true,
-  bibleVersionPosition: "top-right",
-  bibleReferencePosition: "bottom-right",
-  bibleVersionFontSize: 32,
-  bibleReferenceFontSize: 40,
-  fade: false
-};
-
-const initialHolyricsConfig = {
-  host: "127.0.0.1",
-  port: 8080,
-  path: "/view/text.json",
-  method: "GET",
-  token: "",
-  tokenHeader: "Authorization",
-  textPath: "map.text",
-  pullEnabled: true,
-  pullIntervalMs: 400,
-  timeoutMs: 1500
-};
-
-const initialLayoutConfig = {
-  music: {
-    breakEveryLines: 0
-  }
-};
-
-const createInitialDrafts = () =>
-  CHANNELS.reduce((acc, channel) => {
-    acc[channel.id] = {
-      texto: "",
-      style: { ...initialStyle },
-      bibleInfo: {
-        version: "",
-        reference: ""
-      },
-      type: ""
-    };
-    return acc;
-  }, {});
-
-const parseServerStyle = (style = {}) => {
-  const parsedBackgroundMode =
-    style.backgroundMode || (style.backgroundTransparent ? "transparent" : "solid");
-
-  return {
-    ...initialStyle,
-    ...style,
-    backgroundMode: parsedBackgroundMode,
-    fontSize: Number(String(style.fontSize || initialStyle.fontSize).replace("px", "")) || initialStyle.fontSize,
-    bibleVersionFontSize:
-      Number(String(style.bibleVersionFontSize || initialStyle.bibleVersionFontSize).replace("px", "")) ||
-      initialStyle.bibleVersionFontSize,
-    bibleReferenceFontSize:
-      Number(String(style.bibleReferenceFontSize || initialStyle.bibleReferenceFontSize).replace("px", "")) ||
-      initialStyle.bibleReferenceFontSize,
-    shadowEnabled: style.shadowEnabled ?? style.textShadow !== "none"
-  };
-};
-
-const buildStylePayload = (style) => ({
-  color: style.color,
-  fontSize: Number(style.fontSize),
-  fontFamily: normalizeFontFamilySelection(style.fontFamily),
-  fontImportUrl: String(style.fontImportUrl || "").trim(),
-  textAlign: style.textAlign,
-  shadowEnabled: style.shadowEnabled,
-  shadowIntensity: Number(style.shadowIntensity),
-  backgroundMode: style.backgroundMode,
-  backgroundTransparent: style.backgroundMode === "transparent",
-  backgroundColor: style.backgroundColor,
-  gradientColor: style.gradientColor,
-  gradientOpacity: Number(style.gradientOpacity),
-  gradientSpread: Number(style.gradientSpread),
-  gradientDirection: style.gradientDirection,
-  showBibleVersion: Boolean(style.showBibleVersion),
-  showBibleReference: Boolean(style.showBibleReference),
-  bibleVersionPosition: style.bibleVersionPosition,
-  bibleReferencePosition: style.bibleReferencePosition,
-  bibleVersionFontSize: Number(style.bibleVersionFontSize),
-  bibleReferenceFontSize: Number(style.bibleReferenceFontSize),
-  fade: style.fade
-});
-
-const parseBibleInfo = (info = {}) => ({
-  version: typeof info?.version === "string" ? info.version.trim() : "",
-  reference: typeof info?.reference === "string" ? info.reference.trim() : ""
-});
-
-const parseType = (value) => (typeof value === "string" ? value.trim() : "");
-
-const toPreviewMetaClass = (position = "top-right") => {
-  const normalized = String(position || "").toLowerCase();
-  if (
-    [
-      "top-left",
-      "top-center",
-      "top-right",
-      "bottom-left",
-      "bottom-center",
-      "bottom-right"
-    ].includes(normalized)
-  ) {
-    return `preview-${normalized}`;
-  }
-
-  return "preview-top-right";
-};
-
-const getFontSelectValue = (fontFamily) => {
-  const selected = String(fontFamily || initialStyle.fontFamily).trim();
-  return FONT_OPTIONS.some((option) => option.value === selected) ? selected : "custom";
-};
-
-const getCustomFontInputValue = (fontFamily) => {
-  const selected = String(fontFamily || initialStyle.fontFamily).trim();
-  return FONT_OPTIONS.some((option) => option.value === selected) ? "" : selected;
-};
-
-const normalizeFontFamilySelection = (fontFamily) => {
-  const selected = String(fontFamily || initialStyle.fontFamily).trim();
-  if (FONT_OPTIONS.some((option) => option.value === selected)) {
-    return selected;
-  }
-
-  if (FONT_FALLBACKS[selected]) {
-    return FONT_FALLBACKS[selected];
-  }
-
-  return selected || initialStyle.fontFamily;
-};
-
-const ensureGoogleFontImport = (url) => {
-  if (typeof document === "undefined" || !url) {
-    return;
-  }
-
-  const trimmedUrl = String(url).trim();
-  if (!trimmedUrl) {
-    return;
-  }
-
-  let link = document.querySelector(`link[data-google-font-import="${trimmedUrl}"]`);
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = trimmedUrl;
-    link.setAttribute("data-google-font-import", trimmedUrl);
-    document.head.appendChild(link);
-  }
-};
-
-const buildPreviewBackground = (style) => {
-  if (style.backgroundMode === "solid") {
-    return style.backgroundColor;
-  }
-
-  if (style.backgroundMode === "gradient") {
-    return `linear-gradient(${style.gradientDirection}, ${style.gradientColor} 0%, transparent ${style.gradientSpread}%)`;
-  }
-
-  return "linear-gradient(140deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%)";
-};
-
-const joinFieldClasses = (...classes) => classes.filter(Boolean).join(" ");
-
-// Wrapper around fetch() that surfaces non-2xx responses as real errors
-// instead of silently parsing whatever body came back (or throwing an
-// opaque "Unexpected token" error when the body isn't JSON at all).
-const fetchJson = async (url, options) => {
-  const response = await fetch(url, options);
-
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = await response.text();
-    } catch (_error) {
-      // ignore - body may not be readable
-    }
-    throw new Error(`${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`);
-  }
-
-  const text = await response.text();
-  if (!text) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (_error) {
-    throw new Error("Resposta do servidor nao e um JSON valido.");
-  }
-};
-
-const FieldLabel = ({ children, className = "", fullWidth = false, inline = false }) => (
-  <label className={joinFieldClasses("field", className, fullWidth && "field-full", inline && "inline")}>
-    {children}
-  </label>
-);
-
-const TextField = ({ label, value, onChange, placeholder, fullWidth = false, className = "", ...props }) => (
-  <FieldLabel fullWidth={fullWidth} className={className}>
-    <span>{label}</span>
-    <input type="text" value={value} onChange={onChange} placeholder={placeholder} {...props} />
-  </FieldLabel>
-);
-
-const NumberField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
-  <FieldLabel fullWidth={fullWidth} className={className}>
-    <span>{label}</span>
-    <input type="number" value={value} onChange={onChange} {...props} />
-  </FieldLabel>
-);
-
-const ColorField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
-  <FieldLabel fullWidth={fullWidth} className={className}>
-    <span>{label}</span>
-    <input type="color" className="custom-color" value={value} onChange={onChange} {...props} />
-  </FieldLabel>
-);
-
-const RangeField = ({ label, value, onChange, fullWidth = false, className = "", ...props }) => (
-  <FieldLabel fullWidth={fullWidth} className={className}>
-    <span>{label}</span>
-    <input type="range" className="custom-range" value={value} onChange={onChange} {...props} />
-  </FieldLabel>
-);
-
-// Custom-styled <select> replacement. The dropdown menu is rendered through
-// a portal straight into document.body and positioned with fixed coords, so
-// it can never get clipped or hidden behind another card's stacking context
-// (which is what all the z-index/isolation hacks in the CSS were working
-// around). Also supports basic keyboard navigation (Arrow keys, Enter, Esc).
-const SelectField = ({ label, value, onChange, children, fullWidth = false, disabled = false, className = "", ...props }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [menuRect, setMenuRect] = useState(null);
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const triggerRef = useRef(null);
-  const menuRef = useRef(null);
-
-  const options = useMemo(() => {
-    const items = Array.isArray(children) ? children : [children];
-
-    return items
-      .filter(Boolean)
-      .map((child) => ({
-        value: child?.props?.value ?? "",
-        label: child?.props?.children ?? child?.props?.value ?? ""
-      }));
-  }, [children]);
-
-  const selectedOption = options.find((option) => option.value === value) || options[0] || {};
-  const selectedIndex = options.findIndex((option) => option.value === value);
-
-  const updateMenuRect = useCallback(() => {
-    if (!triggerRef.current) {
-      return;
-    }
-    const rect = triggerRef.current.getBoundingClientRect();
-    setMenuRect({
-      top: rect.bottom + 6,
-      left: rect.left,
-      width: rect.width
-    });
-  }, []);
-
-  const openMenu = useCallback(() => {
-    if (disabled) {
-      return;
-    }
-    updateMenuRect();
-    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    setIsOpen(true);
-  }, [disabled, selectedIndex, updateMenuRect]);
-
-  const closeMenu = useCallback(() => setIsOpen(false), []);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return undefined;
-    }
-
-    const handlePointerDown = (event) => {
-      if (triggerRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) {
-        return;
-      }
-      closeMenu();
-    };
-
-    const handleReposition = () => updateMenuRect();
-
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
-
-    return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
-    };
-  }, [isOpen, closeMenu, updateMenuRect]);
-
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const highlightedEl = menuRef.current.children[highlightedIndex];
-      highlightedEl?.scrollIntoView({ block: "nearest" });
-    }
-  }, [isOpen, highlightedIndex]);
-
-  const handleTriggerKeyDown = (event) => {
-    if (disabled) {
-      return;
-    }
-
-    if (!isOpen) {
-      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
-        event.preventDefault();
-        openMenu();
-      }
-      return;
-    }
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      const option = options[highlightedIndex];
-      if (option) {
-        onChange({ target: { value: option.value } });
-        closeMenu();
-      }
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      closeMenu();
-    }
-  };
-
-  return (
-    <FieldLabel fullWidth={fullWidth} className={joinFieldClasses("custom-select-field", className)}>
-      <span>{label}</span>
-      <button
-        type="button"
-        ref={triggerRef}
-        className={joinFieldClasses("custom-select-trigger", isOpen && "open")}
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        onClick={() => (isOpen ? closeMenu() : openMenu())}
-        onKeyDown={handleTriggerKeyDown}
-        {...props}
-      >
-        <span className="custom-select-value">{selectedOption.label || value}</span>
-        <span className="custom-select-arrow" aria-hidden="true" />
-      </button>
-
-      {isOpen &&
-        menuRect &&
-        createPortal(
-          <div
-            ref={menuRef}
-            role="listbox"
-            className="custom-select-menu open"
-            style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
-          >
-            {options.map((option, index) => (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={option.value === value}
-                className={joinFieldClasses(
-                  "custom-select-option",
-                  option.value === value && "selected",
-                  index === highlightedIndex && "highlighted"
-                )}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => {
-                  onChange({ target: { value: option.value } });
-                  closeMenu();
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>,
-          document.body
-        )}
-    </FieldLabel>
-  );
-};
-
-const CheckboxField = ({ label, checked, onChange, inline = false, fullWidth = false, className = "", ...props }) => (
-  <FieldLabel inline={inline} fullWidth={fullWidth} className={joinFieldClasses("custom-checkbox-field", className)}>
-    <span className="custom-checkbox">
-      <input type="checkbox" checked={checked} onChange={onChange} {...props} />
-      <span className="checkbox-indicator" aria-hidden="true" />
-    </span>
-    <span className="checkbox-text">{label}</span>
-  </FieldLabel>
-);
-
-const TextareaField = ({ label, value, onChange, placeholder, fullWidth = false, ...props }) => (
-  <FieldLabel fullWidth={fullWidth}>
-    <span>{label}</span>
-    <textarea value={value} onChange={onChange} placeholder={placeholder} {...props} />
-  </FieldLabel>
-);
 
 function App() {
   const [selectedChannel, setSelectedChannel] = useState("default");
@@ -476,70 +39,21 @@ function App() {
   const [status, setStatus] = useState("Pronto");
   const [holyricsConfig, setHolyricsConfig] = useState(initialHolyricsConfig);
   const [layoutConfig, setLayoutConfig] = useState(initialLayoutConfig);
+  const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
+  const [presets, setPresets] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     title: "",
     message: "",
     confirmLabel: "Confirmar",
     cancelLabel: "Cancelar",
-    danger: false
+    danger: false,
   });
   const confirmResolverRef = useRef(null);
   const socketRef = useRef(null);
 
-  const currentDraft = channelDrafts[selectedChannel] || {
-    texto: "",
-    style: initialStyle,
-    bibleInfo: { version: "", reference: "" },
-    type: ""
-  };
+  const currentDraft = channelDrafts[selectedChannel] || createEmptyDraft();
   const currentStyle = currentDraft.style;
-  const isBottomPosition = (position) => String(position || "").toLowerCase().startsWith("bottom");
-  const isTopPosition = (position) => String(position || "").toLowerCase().startsWith("top");
-  const showPreviewVersion = selectedChannel === "bible" && currentStyle.showBibleVersion;
-  const showPreviewReference = selectedChannel === "bible" && currentStyle.showBibleReference;
-  const samePreviewMetaPosition =
-    showPreviewVersion &&
-    showPreviewReference &&
-    currentStyle.bibleVersionPosition === currentStyle.bibleReferencePosition;
-
-  const previewVersionOffsetPx =
-    samePreviewMetaPosition && isBottomPosition(currentStyle.bibleVersionPosition)
-      ? Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.2) + 10
-      : 0;
-
-  const previewReferenceOffsetPx =
-    samePreviewMetaPosition && isTopPosition(currentStyle.bibleReferencePosition)
-      ? Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.2) + 10
-      : 0;
-
-  let previewTopPaddingPx = 20;
-  if (showPreviewVersion && isTopPosition(currentStyle.bibleVersionPosition)) {
-    previewTopPaddingPx = Math.max(
-      previewTopPaddingPx,
-      Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.35) + 26
-    );
-  }
-  if (showPreviewReference && isTopPosition(currentStyle.bibleReferencePosition)) {
-    previewTopPaddingPx = Math.max(
-      previewTopPaddingPx,
-      Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.35) + 26 + previewReferenceOffsetPx
-    );
-  }
-
-  let previewBottomPaddingPx = 20;
-  if (showPreviewVersion && isBottomPosition(currentStyle.bibleVersionPosition)) {
-    previewBottomPaddingPx = Math.max(
-      previewBottomPaddingPx,
-      Math.round((Number(currentStyle.bibleVersionFontSize) || 32) * 1.35) + 26 + previewVersionOffsetPx
-    );
-  }
-  if (showPreviewReference && isBottomPosition(currentStyle.bibleReferencePosition)) {
-    previewBottomPaddingPx = Math.max(
-      previewBottomPaddingPx,
-      Math.round((Number(currentStyle.bibleReferenceFontSize) || 40) * 1.35) + 26
-    );
-  }
 
   const closeConfirmDialog = useCallback((result) => {
     if (confirmResolverRef.current) {
@@ -549,7 +63,7 @@ function App() {
 
     setConfirmDialog((prev) => ({
       ...prev,
-      open: false
+      open: false,
     }));
   }, []);
 
@@ -563,7 +77,7 @@ function App() {
       message = "Deseja continuar?",
       confirmLabel = "Confirmar",
       cancelLabel = "Cancelar",
-      danger = false
+      danger = false,
     }) => {
       if (confirmResolverRef.current) {
         return Promise.resolve(false);
@@ -577,7 +91,7 @@ function App() {
           message,
           confirmLabel,
           cancelLabel,
-          danger
+          danger,
         });
       });
     },
@@ -586,12 +100,7 @@ function App() {
 
   const updateDraft = useCallback((channel, updater) => {
     setChannelDrafts((prev) => {
-      const current = prev[channel] || {
-        texto: "",
-        style: { ...initialStyle },
-        bibleInfo: { version: "", reference: "" },
-        type: ""
-      };
+      const current = prev[channel] || createEmptyDraft();
       const nextPartial = typeof updater === "function" ? updater(current) : updater;
 
       return {
@@ -601,13 +110,13 @@ function App() {
           ...nextPartial,
           style: {
             ...current.style,
-            ...(nextPartial?.style || {})
+            ...(nextPartial?.style || {}),
           },
           bibleInfo: {
             ...current.bibleInfo,
-            ...(nextPartial?.bibleInfo || {})
-          }
-        }
+            ...(nextPartial?.bibleInfo || {}),
+          },
+        },
       };
     });
   }, []);
@@ -620,7 +129,7 @@ function App() {
         texto: typeof data?.texto === "string" ? data.texto : current.texto,
         style: data?.estilo ? parseServerStyle(data.estilo) : current.style,
         bibleInfo: parseBibleInfo(data?.meta?.bibleInfo),
-        type: parseType(data?.meta?.type)
+        type: parseType(data?.meta?.type),
       }));
     },
     [updateDraft]
@@ -636,7 +145,7 @@ function App() {
   useEffect(() => {
     const socket = io(BACKEND_URL, {
       transports: ["websocket"],
-      query: { channel: selectedChannel }
+      query: { channel: selectedChannel },
     });
     socketRef.current = socket;
 
@@ -647,7 +156,7 @@ function App() {
         texto: typeof payload?.texto === "string" ? payload.texto : current.texto,
         style: payload?.estilo ? parseServerStyle(payload.estilo) : current.style,
         bibleInfo: parseBibleInfo(payload?.meta?.bibleInfo),
-        type: parseType(payload?.meta?.type)
+        type: parseType(payload?.meta?.type),
       }));
     };
 
@@ -693,7 +202,9 @@ function App() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const results = await Promise.allSettled(CHANNELS.map((channel) => loadChannelState(channel.id)));
+      const results = await Promise.allSettled(
+        CHANNELS.map((channel) => loadChannelState(channel.id))
+      );
       const failedChannels = results
         .map((result, index) => (result.status === "rejected" ? CHANNELS[index].label : null))
         .filter(Boolean);
@@ -707,7 +218,7 @@ function App() {
         if (data?.config) {
           setHolyricsConfig({
             ...initialHolyricsConfig,
-            ...data.config
+            ...data.config,
           });
         }
       } catch (_error) {
@@ -722,12 +233,40 @@ function App() {
             ...data.config,
             music: {
               ...initialLayoutConfig.music,
-              ...(data.config.music || {})
-            }
+              ...(data.config.music || {}),
+            },
           });
         }
       } catch (_error) {
         setStatus("Falha ao buscar configuracao de layout.");
+      }
+
+      try {
+        const data = await fetchJson(`${BACKEND_URL}/holyrics/diagnostics`);
+        if (data?.diagnostics) {
+          setDiagnostics(data.diagnostics);
+        }
+      } catch (_error) {
+        setStatus("Falha ao buscar diagnostico do Holyrics.");
+      }
+
+      try {
+        const data = await fetchJson(`${BACKEND_URL}/runtime-config/status`);
+        if (data?.warning) {
+          setStatus(data.warning);
+        }
+      } catch (_error) {
+        // status de configuracao e informativo - falha aqui nao deve
+        // sobrescrever mensagens de status mais relevantes do bootstrap
+      }
+
+      try {
+        const data = await fetchJson(`${BACKEND_URL}/presets`);
+        if (Array.isArray(data?.presets)) {
+          setPresets(data.presets);
+        }
+      } catch (_error) {
+        setStatus("Falha ao buscar presets salvos.");
       }
     };
 
@@ -748,25 +287,30 @@ function App() {
     updateDraft(selectedChannel, (current) => ({
       style: {
         ...current.style,
-        [field]: value
-      }
+        [field]: value,
+      },
     }));
   };
 
   const handleTextChange = (value) => {
     updateDraft(selectedChannel, {
-      texto: value
+      texto: value,
     });
   };
 
-  const sendUpdate = async ({ target, includeText = true }) => {
+  const sendUpdate = async ({
+    target,
+    includeText = true,
+    texto = currentDraft.texto,
+    styleOverride = {},
+  }) => {
     const payload = {
       target,
-      estilo: buildStylePayload(currentStyle)
+      estilo: buildStylePayload({ ...currentStyle, ...styleOverride }),
     };
 
     if (includeText) {
-      payload.texto = currentDraft.texto;
+      payload.texto = texto;
     }
 
     const socket = socketRef.current;
@@ -784,9 +328,9 @@ function App() {
     await fetchJson(`${BACKEND_URL}/letra`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
 
     setStatus(`Atualizado por HTTP (destino: ${target}).`);
@@ -809,7 +353,7 @@ function App() {
         title: "Enviar estilo para todos",
         message: "Deseja aplicar o estilo atual em todos os canais?",
         confirmLabel: "Enviar",
-        danger: true
+        danger: true,
       }))
     ) {
       setStatus("Operacao cancelada.");
@@ -825,6 +369,41 @@ function App() {
     }
   };
 
+  const handleClearChannel = async () => {
+    setStatus(`Limpando canal ${selectedChannel}...`);
+
+    try {
+      await sendUpdate({ target: selectedChannel, includeText: true, texto: "" });
+      updateDraft(selectedChannel, { texto: "" });
+      setStatus(`Canal ${selectedChannel} limpo.`);
+    } catch (error) {
+      setStatus(`Falha ao limpar canal atual: ${error.message}`);
+    }
+  };
+
+  const handleToggleVisible = async () => {
+    const nextVisible = !currentStyle.visible;
+    setStatus(nextVisible ? "Exibindo canal..." : "Ocultando canal...");
+    updateDraft(selectedChannel, (current) => ({
+      style: { ...current.style, visible: nextVisible },
+    }));
+
+    try {
+      await sendUpdate({
+        target: selectedChannel,
+        includeText: false,
+        styleOverride: { visible: nextVisible },
+      });
+      setStatus(nextVisible ? "Canal visivel novamente." : "Canal oculto (texto preservado).");
+    } catch (error) {
+      setStatus(`Falha ao alterar visibilidade do canal: ${error.message}`);
+    }
+  };
+
+  const handleHolyricsConfigFieldChange = (field, value) => {
+    setHolyricsConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
   const handleHolyricsConfigSave = async (event) => {
     event.preventDefault();
     setStatus("Salvando configuracao Holyrics...");
@@ -833,14 +412,14 @@ function App() {
       await fetchJson(`${BACKEND_URL}/holyrics/config`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           ...holyricsConfig,
           port: Number(holyricsConfig.port),
           pullIntervalMs: Number(holyricsConfig.pullIntervalMs),
-          timeoutMs: Number(holyricsConfig.timeoutMs)
-        })
+          timeoutMs: Number(holyricsConfig.timeoutMs),
+        }),
       });
 
       setStatus("Configuracao Holyrics salva.");
@@ -849,18 +428,82 @@ function App() {
     }
   };
 
+  const handleResetRuntimeConfig = async () => {
+    if (
+      !(await confirmAction({
+        title: "Restaurar configuracao padrao",
+        message:
+          "Isso substitui estilos, layout e configuracao do Holyrics pelos valores padrao em todos os canais. Deseja continuar?",
+        confirmLabel: "Restaurar",
+        danger: true,
+      }))
+    ) {
+      setStatus("Operacao cancelada.");
+      return;
+    }
+
+    setStatus("Restaurando configuracao padrao...");
+
+    try {
+      await fetchJson(`${BACKEND_URL}/runtime-config/reset`, { method: "POST" });
+      await Promise.all(CHANNELS.map((channel) => loadChannelState(channel.id)));
+
+      const holyricsData = await fetchJson(`${BACKEND_URL}/holyrics/config`);
+      if (holyricsData?.config) {
+        setHolyricsConfig({ ...initialHolyricsConfig, ...holyricsData.config });
+      }
+
+      const layoutData = await fetchJson(`${BACKEND_URL}/layout/config`);
+      if (layoutData?.config) {
+        setLayoutConfig({
+          ...initialLayoutConfig,
+          ...layoutData.config,
+          music: { ...initialLayoutConfig.music, ...(layoutData.config.music || {}) },
+        });
+      }
+
+      setStatus("Configuracao restaurada para os valores padrao.");
+    } catch (error) {
+      setStatus(`Falha ao restaurar configuracao padrao: ${error.message}`);
+    }
+  };
+
+  const refreshDiagnostics = async () => {
+    try {
+      const data = await fetchJson(`${BACKEND_URL}/holyrics/diagnostics`);
+      if (data?.diagnostics) {
+        setDiagnostics(data.diagnostics);
+      }
+    } catch (error) {
+      setStatus(`Falha ao atualizar diagnostico: ${error.message}`);
+    }
+  };
+
   const triggerHolyricsPull = async () => {
     setStatus("Forcando leitura da API Holyrics...");
 
     try {
-      await fetchJson(`${BACKEND_URL}/holyrics/pull-now`, {
-        method: "POST"
+      const data = await fetchJson(`${BACKEND_URL}/holyrics/pull-now`, {
+        method: "POST",
       });
+      if (data?.diagnostics) {
+        setDiagnostics(data.diagnostics);
+      }
       setStatus("Leitura Holyrics executada.");
       await loadChannelState(selectedChannel);
     } catch (error) {
       setStatus(`Falha ao executar leitura Holyrics: ${error.message}`);
     }
+  };
+
+  const handleBreakEveryLinesChange = (breakEveryLines) => {
+    setLayoutConfig((prev) => ({
+      ...prev,
+      music: {
+        ...prev.music,
+        breakEveryLines,
+      },
+    }));
   };
 
   const handleLayoutConfigSave = async (event) => {
@@ -871,13 +514,13 @@ function App() {
       await fetchJson(`${BACKEND_URL}/layout/config`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           music: {
-            breakEveryLines: Number(layoutConfig.music.breakEveryLines)
-          }
-        })
+            breakEveryLines: Number(layoutConfig.music.breakEveryLines),
+          },
+        }),
       });
       setStatus("Layout da musica atualizado.");
       await loadChannelState("music");
@@ -898,8 +541,8 @@ function App() {
         gradientColor: "#121212",
         gradientOpacity: 74,
         gradientSpread: 88,
-        gradientDirection: "to top right"
-      }
+        gradientDirection: "to top right",
+      },
     }));
     setStatus("Preset de Biblia aplicado no canal Biblia.");
   };
@@ -920,10 +563,138 @@ function App() {
         gradientOpacity: 66,
         gradientSpread: 86,
         gradientDirection: "to top",
-        fade: true
-      }
+        fade: true,
+      },
     }));
     setStatus("Preset de Musica aplicado no canal Musica.");
+  };
+
+  const handleSavePreset = async (name) => {
+    setStatus(`Salvando preset "${name}"...`);
+
+    try {
+      const data = await fetchJson(`${BACKEND_URL}/presets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, style: buildStylePayload(currentStyle) }),
+      });
+
+      if (data?.preset) {
+        setPresets((prev) => [...prev, data.preset]);
+      }
+      setStatus(`Preset "${name}" salvo.`);
+    } catch (error) {
+      setStatus(`Falha ao salvar preset: ${error.message}`);
+    }
+  };
+
+  const handleRenamePreset = async (id, name) => {
+    setStatus(`Renomeando preset...`);
+
+    try {
+      const data = await fetchJson(`${BACKEND_URL}/presets/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+
+      if (data?.preset) {
+        setPresets((prev) => prev.map((preset) => (preset.id === id ? data.preset : preset)));
+      }
+      setStatus(`Preset renomeado para "${name}".`);
+    } catch (error) {
+      setStatus(`Falha ao renomear preset: ${error.message}`);
+    }
+  };
+
+  const handleDeletePreset = async (id) => {
+    const preset = presets.find((item) => item.id === id);
+
+    if (
+      !(await confirmAction({
+        title: "Excluir preset",
+        message: `Deseja excluir o preset "${preset?.name || id}"?`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    ) {
+      setStatus("Operacao cancelada.");
+      return;
+    }
+
+    setStatus("Excluindo preset...");
+
+    try {
+      await fetchJson(`${BACKEND_URL}/presets/${id}`, { method: "DELETE" });
+      setPresets((prev) => prev.filter((item) => item.id !== id));
+      setStatus("Preset excluido.");
+    } catch (error) {
+      setStatus(`Falha ao excluir preset: ${error.message}`);
+    }
+  };
+
+  const handleApplyPreset = async (id) => {
+    setStatus("Aplicando preset no canal atual...");
+
+    try {
+      await fetchJson(`${BACKEND_URL}/presets/${id}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: selectedChannel }),
+      });
+      await loadChannelState(selectedChannel);
+      setStatus("Preset aplicado no canal atual.");
+    } catch (error) {
+      setStatus(`Falha ao aplicar preset: ${error.message}`);
+    }
+  };
+
+  const handleExportPresets = () => {
+    const blob = new Blob([JSON.stringify({ presets }, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "holyrics-vmix-presets.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Presets exportados.");
+  };
+
+  const handleImportPresetsFile = async (file) => {
+    setStatus("Importando presets...");
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const incomingPresets = Array.isArray(parsed) ? parsed : parsed?.presets;
+
+      if (!Array.isArray(incomingPresets)) {
+        throw new Error("Arquivo deve conter uma lista de presets (ou { presets: [...] }).");
+      }
+
+      const data = await fetchJson(`${BACKEND_URL}/presets/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ presets: incomingPresets }),
+      });
+
+      if (Array.isArray(data?.imported) && data.imported.length > 0) {
+        setPresets((prev) => [...prev, ...data.imported]);
+      }
+
+      const errorCount = data?.errors?.length || 0;
+      setStatus(
+        errorCount > 0
+          ? `${data.imported.length} preset(s) importado(s), ${errorCount} invalido(s).`
+          : `${data.imported.length} preset(s) importado(s) com sucesso.`
+      );
+    } catch (error) {
+      setStatus(`Falha ao importar presets: ${error.message}`);
+    }
   };
 
   return (
@@ -940,486 +711,83 @@ function App() {
         </div>
 
         <div className="channel-switch" role="tablist" aria-label="Canal em edicao">
-          {CHANNELS.map((channel) => (
-            <button
-              key={channel.id}
-              type="button"
-              className={`channel-button ${selectedChannel === channel.id ? "active" : ""}`}
-              onClick={() => setSelectedChannel(channel.id)}
-            >
-              {channel.label}
-            </button>
-          ))}
+          {CHANNELS.map((channel) => {
+            const draft = channelDrafts[channel.id];
+            const hasText = Boolean(draft?.texto?.trim());
+            const isHidden = draft?.style?.visible === false;
+
+            return (
+              <button
+                key={channel.id}
+                type="button"
+                className={`channel-button ${selectedChannel === channel.id ? "active" : ""}`}
+                onClick={() => setSelectedChannel(channel.id)}
+              >
+                <span
+                  className={`channel-status-dot ${hasText ? "has-text" : ""} ${isHidden ? "hidden" : ""}`}
+                  title={isHidden ? "Canal oculto" : hasText ? "Canal com texto" : "Canal vazio"}
+                  aria-hidden="true"
+                />
+                {channel.label}
+              </button>
+            );
+          })}
         </div>
       </header>
 
-      <section className="glass-card">
-        <h2>Editor de Canal</h2>
-        <p className="subtitle">
-          Canal em edicao: <strong>{CHANNELS.find((channel) => channel.id === selectedChannel)?.label}</strong>
-          {currentDraft.type ? (
-            <span className="type-badge" title="Tipo retornado pelo Holyrics">
-              {currentDraft.type}
-            </span>
-          ) : null}
-        </p>
+      <ChannelEditor
+        selectedChannel={selectedChannel}
+        currentDraft={currentDraft}
+        currentStyle={currentStyle}
+        onTextChange={handleTextChange}
+        onStyleChange={handleStyleChange}
+        onSubmit={handleSendSelected}
+        onSendStyleToAll={handleSendStyleToAll}
+        onApplyBiblePreset={applyBibleGradientPreset}
+        onApplyMusicPreset={applyMusicPreset}
+        onClearChannel={handleClearChannel}
+        onToggleVisible={handleToggleVisible}
+      />
 
-        <form onSubmit={handleSendSelected} className="editor-grid">
-          <TextareaField
-            label="Letra atual"
-            fullWidth
-            rows={7}
-            value={currentDraft.texto}
-            onChange={(event) => handleTextChange(event.target.value)}
-            placeholder="Digite aqui a letra em multiplas linhas"
-          />
+      <PresetManager
+        presets={presets}
+        onSave={handleSavePreset}
+        onRename={handleRenamePreset}
+        onApply={handleApplyPreset}
+        onDelete={handleDeletePreset}
+        onExport={handleExportPresets}
+        onImportFile={handleImportPresetsFile}
+      />
 
-          <div className="style-section field-full">
-            <div className="style-section-title">Texto e fonte</div>
+      <MusicLayoutForm
+        layoutConfig={layoutConfig}
+        onBreakEveryLinesChange={handleBreakEveryLinesChange}
+        onSubmit={handleLayoutConfigSave}
+      />
 
-            <ColorField
-              label="Cor da fonte"
-              value={currentStyle.color}
-              onChange={(event) => handleStyleChange("color", event.target.value)}
-            />
+      <HolyricsConfigForm
+        holyricsConfig={holyricsConfig}
+        onFieldChange={handleHolyricsConfigFieldChange}
+        onSubmit={handleHolyricsConfigSave}
+        onPullNow={triggerHolyricsPull}
+      />
 
-            <NumberField
-              label="Tamanho da fonte (px)"
-              min={16}
-              max={220}
-              value={currentStyle.fontSize}
-              onChange={(event) => handleStyleChange("fontSize", event.target.value)}
-            />
-
-            <SelectField
-              label="Fonte"
-              value={getFontSelectValue(currentStyle.fontFamily)}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                if (nextValue === "custom") {
-                  return;
-                }
-
-                handleStyleChange("fontFamily", nextValue);
-              }}
-            >
-              {FONT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </SelectField>
-
-            <TextField
-              label="Fonte personalizada"
-              value={getCustomFontInputValue(currentStyle.fontFamily)}
-              onChange={(event) => handleStyleChange("fontFamily", event.target.value)}
-              placeholder='Ex: "Poppins", sans-serif'
-            />
-
-            <TextField
-              label="URL do Google Fonts"
-              fullWidth
-              value={currentStyle.fontImportUrl || ""}
-              onChange={(event) => handleStyleChange("fontImportUrl", event.target.value)}
-              placeholder='Ex: https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single&display=swap'
-            />
-
-            <SelectField
-              label="Alinhamento"
-              value={currentStyle.textAlign}
-              onChange={(event) => handleStyleChange("textAlign", event.target.value)}
-            >
-              <option value="left">Esquerda</option>
-              <option value="center">Centro</option>
-              <option value="right">Direita</option>
-              <option value="justify">Justificado</option>
-            </SelectField>
-
-            <CheckboxField
-              label="Sombra ativada"
-              inline
-              checked={currentStyle.shadowEnabled}
-              onChange={(event) => handleStyleChange("shadowEnabled", event.target.checked)}
-            />
-
-            <RangeField
-              label={`Intensidade da sombra (${currentStyle.shadowIntensity})`}
-              min={0}
-              max={100}
-              value={currentStyle.shadowIntensity}
-              disabled={!currentStyle.shadowEnabled}
-              onChange={(event) => handleStyleChange("shadowIntensity", event.target.value)}
-            />
-          </div>
-
-          <div className="style-section field-full">
-            <div className="style-section-title">Background e aparência</div>
-
-            <SelectField
-              label="Tipo de background"
-              value={currentStyle.backgroundMode}
-              onChange={(event) => handleStyleChange("backgroundMode", event.target.value)}
-            >
-              <option value="transparent">Transparente</option>
-              <option value="solid">Cor solida</option>
-              <option value="gradient">Gradiente</option>
-            </SelectField>
-
-            {currentStyle.backgroundMode === "solid" && (
-              <ColorField
-                label="Cor do background"
-                value={currentStyle.backgroundColor}
-                onChange={(event) => handleStyleChange("backgroundColor", event.target.value)}
-              />
-            )}
-
-            {currentStyle.backgroundMode === "gradient" && (
-              <>
-                <ColorField
-                  label="Cor base do gradiente"
-                  value={currentStyle.gradientColor}
-                  onChange={(event) => handleStyleChange("gradientColor", event.target.value)}
-                />
-
-                <SelectField
-                  label="Direcao do gradiente"
-                  value={currentStyle.gradientDirection}
-                  onChange={(event) => handleStyleChange("gradientDirection", event.target.value)}
-                >
-                  <option value="to top right">Canto inferior esquerdo para topo direito</option>
-                  <option value="to top left">Canto inferior direito para topo esquerdo</option>
-                  <option value="to top">Baixo para cima</option>
-                  <option value="to right">Esquerda para direita</option>
-                  <option value="to left">Direita para esquerda</option>
-                  <option value="to bottom">Cima para baixo</option>
-                </SelectField>
-
-                <RangeField
-                  label={`Opacidade inicial (${currentStyle.gradientOpacity}%)`}
-                  min={0}
-                  max={100}
-                  value={currentStyle.gradientOpacity}
-                  onChange={(event) => handleStyleChange("gradientOpacity", event.target.value)}
-                />
-
-                <RangeField
-                  label={`Alcance para transparencia (${currentStyle.gradientSpread}%)`}
-                  min={15}
-                  max={100}
-                  value={currentStyle.gradientSpread}
-                  onChange={(event) => handleStyleChange("gradientSpread", event.target.value)}
-                />
-              </>
-            )}
-
-            <CheckboxField
-              label="Fade suave na troca de letra"
-              inline
-              checked={currentStyle.fade}
-              onChange={(event) => handleStyleChange("fade", event.target.checked)}
-            />
-          </div>
-
-          {selectedChannel === "bible" && (
-            <div className="style-section field-full">
-              <div className="style-section-title">Versão e referência bíblica</div>
-
-              <CheckboxField
-                label="Mostrar versao da Biblia"
-                inline
-                checked={currentStyle.showBibleVersion}
-                onChange={(event) => handleStyleChange("showBibleVersion", event.target.checked)}
-              />
-
-              <SelectField
-                label="Posicao da versao"
-                value={currentStyle.bibleVersionPosition}
-                disabled={!currentStyle.showBibleVersion}
-                onChange={(event) => handleStyleChange("bibleVersionPosition", event.target.value)}
-              >
-                {BIBLE_META_POSITIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectField>
-
-              <NumberField
-                label="Tamanho da versao (px)"
-                min={14}
-                max={120}
-                value={currentStyle.bibleVersionFontSize}
-                disabled={!currentStyle.showBibleVersion}
-                onChange={(event) => handleStyleChange("bibleVersionFontSize", event.target.value)}
-              />
-
-              <CheckboxField
-                label="Mostrar livro/capitulo/versiculo"
-                inline
-                checked={currentStyle.showBibleReference}
-                onChange={(event) => handleStyleChange("showBibleReference", event.target.checked)}
-              />
-
-              <SelectField
-                label="Posicao da referencia"
-                value={currentStyle.bibleReferencePosition}
-                disabled={!currentStyle.showBibleReference}
-                onChange={(event) => handleStyleChange("bibleReferencePosition", event.target.value)}
-              >
-                {BIBLE_META_POSITIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectField>
-
-              <NumberField
-                label="Tamanho da referencia (px)"
-                min={16}
-                max={140}
-                value={currentStyle.bibleReferenceFontSize}
-                disabled={!currentStyle.showBibleReference}
-                onChange={(event) => handleStyleChange("bibleReferenceFontSize", event.target.value)}
-              />
-            </div>
-          )}
-
-          <div className="field field-full action-row">
-            <button type="submit">Salvar no canal atual</button>
-            <button type="button" className="ghost" onClick={handleSendStyleToAll}>
-              Enviar estilo para todos
-            </button>
-            <button type="button" className="ghost" onClick={applyBibleGradientPreset}>
-              Preset Biblia
-            </button>
-            <button type="button" className="ghost" onClick={applyMusicPreset}>
-              Preset Musica
-            </button>
-          </div>
-        </form>
-
-        <div
-          className="preview-box"
-          style={{
-            background: buildPreviewBackground(currentStyle),
-            paddingTop: `${previewTopPaddingPx}px`,
-            paddingBottom: `${previewBottomPaddingPx}px`
-          }}
-        >
-          <p
-            style={{
-              color: currentStyle.color,
-              fontFamily: currentStyle.fontFamily,
-              textAlign: currentStyle.textAlign,
-              textShadow: currentStyle.shadowEnabled
-                ? `0 0 ${Math.round((Number(currentStyle.shadowIntensity) / 100) * 36)}px rgba(0,0,0,0.95)`
-                : "none"
-            }}
-          >
-            {currentDraft.texto || "Previa do canal selecionado"}
-          </p>
-
-          {showPreviewVersion && (
-            <span
-              className={`preview-meta preview-version ${toPreviewMetaClass(currentStyle.bibleVersionPosition)}`}
-              style={{
-                color: currentStyle.color,
-                fontFamily: currentStyle.fontFamily,
-                fontSize: `${Number(currentStyle.bibleVersionFontSize) || 32}px`,
-                ...(isBottomPosition(currentStyle.bibleVersionPosition)
-                  ? { bottom: `${12 + previewVersionOffsetPx}px` }
-                  : {}),
-                textShadow: currentStyle.shadowEnabled
-                  ? `0 0 ${Math.round((Number(currentStyle.shadowIntensity) / 100) * 20)}px rgba(0,0,0,0.95)`
-                  : "none"
-              }}
-            >
-              {currentDraft.bibleInfo?.version || "A Bíblia Sagrada, Almeida Corrigida Fiel | acf"}
-            </span>
-          )}
-
-          {showPreviewReference && (
-            <span
-              className={`preview-meta preview-reference ${toPreviewMetaClass(currentStyle.bibleReferencePosition)}`}
-              style={{
-                color: currentStyle.color,
-                fontFamily: currentStyle.fontFamily,
-                fontSize: `${Number(currentStyle.bibleReferenceFontSize) || 40}px`,
-                ...(isTopPosition(currentStyle.bibleReferencePosition)
-                  ? { top: `${12 + previewReferenceOffsetPx}px` }
-                  : {}),
-                textShadow: currentStyle.shadowEnabled
-                  ? `0 0 ${Math.round((Number(currentStyle.shadowIntensity) / 100) * 20)}px rgba(0,0,0,0.95)`
-                  : "none"
-              }}
-            >
-              {currentDraft.bibleInfo?.reference || "Gênesis 17:1"}
-            </span>
-          )}
-        </div>
-      </section>
-
-      <section className="glass-card compact">
-        <h2>Layout Musica</h2>
-        <p className="subtitle">Agrupa a musica em blocos de linhas e junta cada bloco em uma linha.</p>
-
-        <form onSubmit={handleLayoutConfigSave} className="inline-form">
-          <SelectField
-            label="Agrupar musica a cada"
-            value={layoutConfig.music.breakEveryLines}
-            onChange={(event) =>
-              setLayoutConfig((prev) => ({
-                ...prev,
-                music: {
-                  ...prev.music,
-                  breakEveryLines: Number(event.target.value)
-                }
-              }))
-            }
-          >
-            <option value={0}>Desativado</option>
-            <option value={2}>2 linhas</option>
-            <option value={3}>3 linhas</option>
-            <option value={4}>4 linhas</option>
-            <option value={5}>5 linhas</option>
-          </SelectField>
-
-          <button type="submit">Salvar layout da musica</button>
-        </form>
-      </section>
-
-      <section className="glass-card compact">
-        <h2>Integracao Holyrics</h2>
-        <p className="subtitle">Configure IP, porta, token e modo de leitura da API.</p>
-
-        <form onSubmit={handleHolyricsConfigSave} className="editor-grid">
-          <TextField
-            label="IP / Host"
-            value={holyricsConfig.host}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, host: event.target.value }))}
-          />
-
-          <NumberField
-            label="Porta"
-            value={holyricsConfig.port}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, port: event.target.value }))}
-          />
-
-          <TextField
-            label="Path da API"
-            fullWidth
-            value={holyricsConfig.path}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, path: event.target.value }))}
-          />
-
-          <SelectField
-            label="Metodo HTTP"
-            value={holyricsConfig.method}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, method: event.target.value }))}
-          >
-            <option value="GET">GET</option>
-            <option value="POST">POST</option>
-          </SelectField>
-
-          <TextField
-            label="Token"
-            value={holyricsConfig.token}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, token: event.target.value }))}
-          />
-
-          <TextField
-            label="Header do token"
-            value={holyricsConfig.tokenHeader}
-            onChange={(event) =>
-              setHolyricsConfig((prev) => ({ ...prev, tokenHeader: event.target.value }))
-            }
-            placeholder="Authorization"
-          />
-
-          <TextField
-            label="Campo do texto (path)"
-            value={holyricsConfig.textPath}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, textPath: event.target.value }))}
-            placeholder="Ex: map.text"
-          />
-
-          <NumberField
-            label="Intervalo do pull (ms)"
-            min={100}
-            max={5000}
-            value={holyricsConfig.pullIntervalMs}
-            onChange={(event) =>
-              setHolyricsConfig((prev) => ({ ...prev, pullIntervalMs: event.target.value }))
-            }
-          />
-
-          <NumberField
-            label="Timeout HTTP (ms)"
-            min={500}
-            max={6000}
-            value={holyricsConfig.timeoutMs}
-            onChange={(event) => setHolyricsConfig((prev) => ({ ...prev, timeoutMs: event.target.value }))}
-          />
-
-          <CheckboxField
-            label="Ativar leitura automatica (pull)"
-            inline
-            fullWidth
-            checked={holyricsConfig.pullEnabled}
-            onChange={(event) =>
-              setHolyricsConfig((prev) => ({ ...prev, pullEnabled: event.target.checked }))
-            }
-          />
-
-          <div className="field field-full action-row">
-            <button type="submit">Salvar configuracao Holyrics</button>
-            <button type="button" className="ghost" onClick={triggerHolyricsPull}>
-              Ler agora da API Holyrics
-            </button>
-          </div>
-        </form>
-      </section>
+      <HolyricsDiagnostics
+        diagnostics={diagnostics}
+        onRefresh={refreshDiagnostics}
+        onResetDefaults={handleResetRuntimeConfig}
+      />
 
       <footer className="glass-card footer-card">
         <p className="status">Status: {status}</p>
-        <p className="tips">
-          Browser Input Default: <code>{BACKEND_URL}/display</code>
-        </p>
-        <p className="tips">
-          Browser Input Musica: <code>{BACKEND_URL}/display/music</code>
-        </p>
-        <p className="tips">
-          Browser Input Biblia: <code>{BACKEND_URL}/display/bible</code>
-        </p>
+        <VMixUrls backendUrl={BACKEND_URL} />
       </footer>
 
-      {confirmDialog.open && (
-        <div className="confirm-backdrop" role="presentation" onClick={() => closeConfirmDialog(false)}>
-          <section
-            className="confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 id="confirm-title">{confirmDialog.title}</h3>
-            <p>{confirmDialog.message}</p>
-            <div className="confirm-actions">
-              <button type="button" className="ghost" onClick={() => closeConfirmDialog(false)}>
-                {confirmDialog.cancelLabel}
-              </button>
-              <button
-                type="button"
-                className={confirmDialog.danger ? "danger" : ""}
-                onClick={() => closeConfirmDialog(true)}
-              >
-                {confirmDialog.confirmLabel}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <ConfirmDialog
+        dialog={confirmDialog}
+        onCancel={() => closeConfirmDialog(false)}
+        onConfirm={() => closeConfirmDialog(true)}
+      />
     </main>
   );
 }
