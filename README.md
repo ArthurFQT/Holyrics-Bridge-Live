@@ -53,6 +53,9 @@ Para cenarios de instalacao com Holyrics/vMix/painel em maquinas diferentes,
 descoberta de IP na rede, e troubleshooting (firewall, porta ocupada, CORS,
 etc), veja o [Guia de cenarios reais](docs/guia-cenarios-reais.md).
 
+Para iniciar o backend/painel automaticamente no login do Windows (ou junto
+com o vMix), veja [Iniciar junto com o vMix](docs/iniciar-junto-com-vmix.md).
+
 ## Canais (separacao Musica/Biblia)
 
 O backend mantem 3 canais independentes:
