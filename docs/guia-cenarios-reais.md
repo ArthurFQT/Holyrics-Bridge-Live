@@ -13,9 +13,15 @@ troubleshooting para os problemas mais comuns.
 | Holyrics WebService Plugin  | `4747` ou `8080` (configuravel) | Maquina do Holyrics             |
 
 `PORT` e `HOST` do backend ficam em `server/.env` (copie de
-`server/.env.example`). O painel le a URL do backend de
-`control-panel/.env` (`VITE_BACKEND_URL`), copiado de
-`control-panel/.env.example`.
+`server/.env.example`).
+
+O painel **detecta o backend automaticamente**: ele usa o mesmo host pelo
+qual voce abriu a pagina do painel (ex: abriu em `http://192.168.0.6:5173`
+-> backend em `http://192.168.0.6:3001`). Isso significa que, na maioria
+dos casos, voce nao precisa configurar nada no `control-panel/.env` mesmo
+que o IP da rede mude. So defina `VITE_BACKEND_URL` (em
+`control-panel/.env`, copiado de `control-panel/.env.example`) se o backend
+rodar numa **maquina diferente** da que serve o painel (ver Cenario 2).
 
 ## Como descobrir o IP da maquina na rede local
 
@@ -36,11 +42,9 @@ Holyrics, backend, painel e vMix na mesma maquina.
 
 1. Configure `server/.env` com `HOLYRICS_HOST=127.0.0.1` e a porta do
    WebService Plugin do Holyrics.
-2. Configure `control-panel/.env` com
-   `VITE_BACKEND_URL=http://localhost:3001`.
-3. `npm run dev` na raiz.
-4. No vMix, use os Browser Input com `http://localhost:3001/display/...`.
-5. Abra o painel em `http://localhost:5173`.
+2. `npm run dev` na raiz (nao precisa mexer em `control-panel/.env`).
+3. No vMix, use os Browser Input com `http://localhost:3001/display/...`.
+4. Abra o painel em `http://localhost:5173`.
 
 ## Cenario 2 - Holyrics em um PC, vMix em outro
 
@@ -65,13 +69,22 @@ transmissao.
 Util para o operador controlar letras/estilo do celular, tablet ou notebook
 sem precisar sentar no PC do vMix.
 
-1. Descubra o IP do PC que roda o backend (ex: `192.168.0.10`).
-2. Configure `control-panel/.env`:
-   - `VITE_BACKEND_URL=http://192.168.0.10:3001`
-3. Suba o painel com `npm run dev -- --host` (ou `npm run dev` na raiz, que
-   ja usa `--host`) para aceitar conexoes de outros dispositivos.
-4. No celular/tablet (mesma rede Wi-Fi), acesse
-   `http://192.168.0.10:5173`.
+1. Descubra o IP do PC que roda o painel e o backend (ex: `192.168.0.10`) -
+   veja "Como descobrir o IP" acima.
+2. Suba o projeto normalmente com `npm run dev` na raiz (ja usa `--host`,
+   entao aceita conexoes de outros dispositivos). Nao precisa configurar
+   `control-panel/.env`.
+3. No celular/tablet (mesma rede Wi-Fi), acesse
+   `http://192.168.0.10:5173` - o painel detecta sozinho que o backend fica
+   em `http://192.168.0.10:3001`.
+
+### Quando `VITE_BACKEND_URL` e realmente necessario
+
+Só se o processo do painel (`control-panel`, Vite) e o processo do backend
+(`server`, Express) rodarem em **maquinas fisicas diferentes** (não é o caso
+de nenhum dos cenarios acima, onde `npm run dev` sobe os dois juntos).
+Nesse caso, configure `control-panel/.env` com
+`VITE_BACKEND_URL=http://<ip-da-maquina-do-backend>:3001`.
 
 ## Troubleshooting
 

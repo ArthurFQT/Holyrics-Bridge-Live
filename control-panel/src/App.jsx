@@ -19,7 +19,18 @@ import { parseBibleInfo, parseType } from "./utils/bibleInfo";
 import { fetchJson } from "./utils/fetchJson";
 import { buildStylePayload, ensureGoogleFontImport, parseServerStyle } from "./utils/style";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+// Por padrao, o backend e inferido a partir do host usado para abrir o
+// proprio painel (ex: painel aberto em `http://192.168.0.6:5173` -> backend
+// em `http://192.168.0.6:3001`). Isso faz o painel funcionar em qualquer
+// maquina/IP da rede sem precisar editar `.env` toda vez que o IP mudar.
+// `VITE_BACKEND_URL` continua funcionando como override explicito, para o
+// caso do backend rodar numa maquina diferente da que serve o painel.
+const inferBackendUrl = () =>
+  typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : "http://localhost:3001";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || inferBackendUrl();
 
 const initialDiagnostics = {
   lastAttemptAt: null,
