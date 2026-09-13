@@ -1,4 +1,3 @@
-﻿
 import axios from "axios";
 
 const getByPath = (obj, path) => {
@@ -64,15 +63,23 @@ const cleanBibleVersionText = (value) => {
   return cleaned.replace(/^\(([^)]+)\)$/, "$1").trim();
 };
 
-const cleanBibleReferenceText = (value) =>
-  normalizeInlineSpaces(stripHtmlTags(value));
+const cleanBibleReferenceText = (value) => normalizeInlineSpaces(stripHtmlTags(value));
 
 const looksLikeBibleAbbreviationLine = (line) =>
   /^\(?\s*[A-Z]{2,8}\s*\)?$/.test(String(line || "").trim());
 
+// Uma linha de versao real e sempre curta (ex: "ACF" ou "A Biblia Sagrada,
+// Almeida Corrigida Fiel | acf"), nunca uma frase inteira do versiculo - o
+// guard de tamanho evita que um texto biblico longo seja avaliado aqui. As
+// palavras-chave usam limite de palavra (`\b`) para nao casar como
+// substring dentro de palavras comuns do portugues (ex: "ara" aparece
+// dentro de "para" e "separacao", "arc" aparece dentro de "marca") - sem o
+// `\b`, um versiculo comum era classificado como linha de versao e o texto
+// inteiro era descartado, sobrando so a referencia (bug real observado com
+// Genesis 1:4, que contem "separacao").
 const looksLikeBibleVersionLine = (line) => {
-  const value = normalizeInlineSpaces(line).toLowerCase();
-  if (!value) {
+  const value = normalizeInlineSpaces(line);
+  if (!value || value.length > 80) {
     return false;
   }
 
@@ -80,8 +87,8 @@ const looksLikeBibleVersionLine = (line) => {
     return true;
   }
 
-  return /(b[ií]blia|bible|almeida|nvi|acf|ara|arc|nvt|ntlh|king james|kjv|vers[aã]o)/i.test(
-    value,
+  return /\b(?:b[ií]blia|bible|almeida|nvi|acf|ara|arc|nvt|ntlh|king james|kjv|vers[aã]o)\b/i.test(
+    value
   );
 };
 
@@ -95,11 +102,9 @@ const looksLikeBibleReferenceLine = (line) => {
 };
 
 const equalsIgnoringCaseAndExtraSpaces = (left, right) =>
-  normalizeInlineSpaces(left).toLowerCase() ===
-  normalizeInlineSpaces(right).toLowerCase();
+  normalizeInlineSpaces(left).toLowerCase() === normalizeInlineSpaces(right).toLowerCase();
 
-const isBibleVersionAbbreviation = (value) =>
-  /^[A-Z0-9]{2,8}$/i.test(cleanBibleVersionText(value));
+const isBibleVersionAbbreviation = (value) => /^[A-Z0-9]{2,8}$/i.test(cleanBibleVersionText(value));
 
 const pickBestBibleVersion = (currentValue, nextValue) => {
   const current = cleanBibleVersionText(currentValue);
@@ -160,7 +165,7 @@ export const extractBibleInfo = (data) => {
       "current.version_abbr",
       "current.versionAbbr",
       "slide.version",
-    ]),
+    ])
   );
 
   const directReference = getFirstTextByPaths(data, [
@@ -265,11 +270,10 @@ const inferTypeFromContent = (data, text) => {
 
   const looksLikeBible =
     /\b(?:genesis|gênesis|exodo|êxodo|levitico|levítico|numeros|números|deuteronômio|josué|juízes|rute|1 samuel|2 samuel|1 reis|2 reis|1 cronicas|2 cronicas|esdras|neemias|ester|joão|mateus|marcos|lucas|joão|atos|romanos|coríntios|gálatas|efésios|filipenses|colossenses|tessalonicenses|timóteo|tiago|pedro|judas|apocalipse|psalm|salmo|provérbios|provérbios|isaias|jeremias|ezequiel|daniel|oseias|joel|amós|obadias|jonas|miqueias|naum|habacuque|sofonias|ageu|zacarias|malaquias)\b/i.test(
-      normalizedText,
+      normalizedText
     );
 
-  const hasBibleReference =
-    /\b\d{1,3}\s*:\s*\d{1,3}(?:\s*[-–]\s*\d{1,3})?\b/.test(normalizedText);
+  const hasBibleReference = /\b\d{1,3}\s*:\s*\d{1,3}(?:\s*[-–]\s*\d{1,3})?\b/.test(normalizedText);
 
   if (looksLikeBible || hasBibleReference) {
     return "BIBLE";
@@ -322,8 +326,7 @@ const createHeaders = (config) => {
   };
 };
 
-const createUrl = (config) =>
-  `http://${config.host}:${config.port}${config.path}`;
+const createUrl = (config) => `http://${config.host}:${config.port}${config.path}`;
 
 const decodeHtmlEntities = (value) =>
   value
@@ -336,10 +339,7 @@ const decodeHtmlEntities = (value) =>
 
 const sanitizeHolyricsText = (text) => {
   const cleaned = String(text || "")
-    .replace(
-      /<span[^>]*id=['"]text-force-update_[^'"]*['"][^>]*>\s*<\/span>/gi,
-      "",
-    )
+    .replace(/<span[^>]*id=['"]text-force-update_[^'"]*['"][^>]*>\s*<\/span>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|ctt)>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ")
@@ -425,12 +425,7 @@ export const normalizeBibleContent = ({ text, bibleInfo }) =>
 
 export { sanitizeHolyricsText };
 
-export const startHolyricsPull = ({
-  config,
-  onLyric,
-  onError,
-  logger = console,
-}) => {
+export const startHolyricsPull = ({ config, onLyric, onError, logger = console }) => {
   let timer;
   let running = false;
 
@@ -457,7 +452,7 @@ export const startHolyricsPull = ({
       const extractedBibleInfo = extractBibleInfo(response.data);
       const sanitizedText = sanitizeHolyricsText(resolved.text);
       const isBible = /BIBLE|VERSE|VERS[IÍ]CULO|B[IÍ]BLIA/.test(
-        String(holyricsType || "").toUpperCase(),
+        String(holyricsType || "").toUpperCase()
       );
       const normalizedBible = isBible
         ? splitBibleTextFromInlineMeta(sanitizedText, extractedBibleInfo)
@@ -501,13 +496,9 @@ export const startHolyricsPull = ({
   if (config.pullEnabled) {
     fetchNow();
     timer = setInterval(fetchNow, config.pullIntervalMs);
-    logger.info(
-      `[holyrics] Pull ativo em ${createUrl(config)} (${config.pullIntervalMs}ms)`,
-    );
+    logger.info(`[holyrics] Pull ativo em ${createUrl(config)} (${config.pullIntervalMs}ms)`);
   } else {
-    logger.info(
-      "[holyrics] Pull desativado. Use webhook ou ative pull no painel.",
-    );
+    logger.info("[holyrics] Pull desativado. Use webhook ou ative pull no painel.");
   }
 
   return {

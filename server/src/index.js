@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -16,6 +17,7 @@ import {
   startHolyricsPull,
 } from "./holyricsClient.js";
 import {
+  buildRenderStyle,
   CHANNELS,
   createInitialChannelStates,
   getSafeChannel,
@@ -63,10 +65,12 @@ const io = new Server(server, {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const runtimeConfigPath = path.resolve(
-  __dirname,
-  "../data/runtime-config.json",
-);
+const runtimeConfigPath = path.resolve(__dirname, "../data/runtime-config.json");
+const runtimeConfigBackupPath = path.resolve(__dirname, "../data/runtime-config.backup.json");
+const runtimeConfigTmpPath = `${runtimeConfigPath}.tmp`;
+const RUNTIME_CONFIG_VERSION = 1;
+
+let runtimeConfigStatus = { source: "defaults", warning: null };
 
 let channelStates = createInitialChannelStates();
 let holyricsRunner;
@@ -76,6 +80,20 @@ let layoutConfig = {
     breakEveryLines: 0,
   },
 };
+let presets = [];
+
+const sanitizePresetName = (value, fallback = "Preset") => {
+  const trimmed = typeof value === "string" ? value.trim().slice(0, 60) : "";
+  return trimmed || fallback;
+};
+
+const sanitizePreset = (input, existing) => ({
+  id: existing?.id || randomUUID(),
+  name: sanitizePresetName(input?.name, existing?.name),
+  style: buildRenderStyle({ ...(existing?.style || {}), ...(input?.style || {}) }),
+  createdAt: existing?.createdAt || new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
 const holyricsDiagnostics = {
   lastAttemptAt: null,
   lastSuccessAt: null,
@@ -87,23 +105,26 @@ const holyricsDiagnostics = {
   lastChannel: null,
 };
 
-let holyricsConfig = sanitizeHolyricsConfig({
-  host: process.env.HOLYRICS_HOST,
-  port: process.env.HOLYRICS_PORT,
-  path: process.env.HOLYRICS_PATH,
-  method: process.env.HOLYRICS_METHOD,
-  token: process.env.HOLYRICS_TOKEN,
-  tokenHeader: process.env.HOLYRICS_TOKEN_HEADER,
-  textPath: process.env.HOLYRICS_TEXT_PATH,
-  pullEnabled: process.env.HOLYRICS_PULL_ENABLED === "true",
-  pullIntervalMs: process.env.HOLYRICS_PULL_INTERVAL_MS,
-  timeoutMs: process.env.HOLYRICS_TIMEOUT_MS,
-});
+const buildHolyricsConfigFromEnv = () =>
+  sanitizeHolyricsConfig({
+    host: process.env.HOLYRICS_HOST,
+    port: process.env.HOLYRICS_PORT,
+    path: process.env.HOLYRICS_PATH,
+    method: process.env.HOLYRICS_METHOD,
+    token: process.env.HOLYRICS_TOKEN,
+    tokenHeader: process.env.HOLYRICS_TOKEN_HEADER,
+    textPath: process.env.HOLYRICS_TEXT_PATH,
+    pullEnabled: process.env.HOLYRICS_PULL_ENABLED === "true",
+    pullIntervalMs: process.env.HOLYRICS_PULL_INTERVAL_MS,
+    timeoutMs: process.env.HOLYRICS_TIMEOUT_MS,
+  });
+
+let holyricsConfig = buildHolyricsConfigFromEnv();
 
 let persistRuntimeConfigTimer;
 
 const buildPersistedRuntimeConfig = () => ({
-  version: 1,
+  version: RUNTIME_CONFIG_VERSION,
   savedAt: new Date().toISOString(),
   lastHolyricsContentChannel,
   styles: {
@@ -113,16 +134,28 @@ const buildPersistedRuntimeConfig = () => ({
   },
   layoutConfig,
   holyricsConfig,
+  presets,
 });
 
 const persistRuntimeConfigNow = async () => {
   const payload = buildPersistedRuntimeConfig();
   await fs.mkdir(path.dirname(runtimeConfigPath), { recursive: true });
-  await fs.writeFile(
-    runtimeConfigPath,
-    JSON.stringify(payload, null, 2),
-    "utf8",
-  );
+
+  // Guarda uma copia do arquivo anterior antes de sobrescrever, para que uma
+  // gravacao ruim (ou uma mudanca indesejada) tenha um estado recuperavel.
+  try {
+    await fs.copyFile(runtimeConfigPath, runtimeConfigBackupPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn(`[runtime-config] Falha ao criar backup: ${error.message}`);
+    }
+  }
+
+  // Escreve em um arquivo temporario e so entao substitui o arquivo final -
+  // `rename` e atomico no mesmo filesystem, entao uma interrupcao a meio da
+  // escrita nunca deixa `runtime-config.json` truncado/corrompido.
+  await fs.writeFile(runtimeConfigTmpPath, JSON.stringify(payload, null, 2), "utf8");
+  await fs.rename(runtimeConfigTmpPath, runtimeConfigPath);
 };
 
 const schedulePersistRuntimeConfig = () => {
@@ -132,25 +165,75 @@ const schedulePersistRuntimeConfig = () => {
 
   persistRuntimeConfigTimer = setTimeout(() => {
     persistRuntimeConfigNow().catch((error) => {
-      console.warn(
-        `[runtime-config] Falha ao salvar configuracao: ${error.message}`,
-      );
+      console.warn(`[runtime-config] Falha ao salvar configuracao: ${error.message}`);
     });
   }, 180);
 };
 
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const isValidRuntimeConfigShape = (parsed) =>
+  isPlainObject(parsed) && Number.isFinite(Number(parsed.version));
+
+// Hoje e um passthrough (so existe a versao 1), mas isola o ponto de
+// evolucao do formato: uma versao futura pode inspecionar `parsed.version`
+// aqui e adaptar campos antigos sem precisar reescrever o loader inteiro.
+const migrateRuntimeConfig = (parsed) => parsed;
+
+const readRuntimeConfigFile = async (filePath) => {
+  const raw = await fs.readFile(filePath, "utf8");
+  const parsed = JSON.parse(raw);
+
+  if (!isValidRuntimeConfigShape(parsed)) {
+    throw new Error("formato invalido (campo 'version' ausente ou invalido)");
+  }
+
+  return migrateRuntimeConfig(parsed);
+};
+
 const loadPersistedRuntimeConfig = async () => {
   try {
-    const raw = await fs.readFile(runtimeConfigPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch (error) {
-    if (error?.code !== "ENOENT") {
+    const config = await readRuntimeConfigFile(runtimeConfigPath);
+    runtimeConfigStatus = { source: "file", warning: null };
+    return config;
+  } catch (mainError) {
+    const mainMissing = mainError?.code === "ENOENT";
+    if (!mainMissing) {
       console.warn(
-        `[runtime-config] Falha ao carregar configuracao: ${error.message}`,
+        `[runtime-config] Configuracao principal invalida ou corrompida: ${mainError.message}`
       );
     }
-    return null;
+
+    try {
+      const backupConfig = await readRuntimeConfigFile(runtimeConfigBackupPath);
+      runtimeConfigStatus = {
+        source: "backup",
+        warning: mainMissing
+          ? null
+          : `Configuracao principal estava corrompida (${mainError.message}). Valores recuperados do backup mais recente.`,
+      };
+      console.info("[runtime-config] Configuracao recuperada do backup.");
+      return backupConfig;
+    } catch (backupError) {
+      const backupMissing = backupError?.code === "ENOENT";
+      const bothMissing = mainMissing && backupMissing;
+
+      runtimeConfigStatus = {
+        source: "defaults",
+        warning: bothMissing
+          ? null
+          : "Configuracao salva e backup estavam corrompidos ou inacessiveis - iniciando com valores padrao.",
+      };
+
+      if (!bothMissing) {
+        console.warn(
+          `[runtime-config] Backup tambem indisponivel ou invalido (${backupError.message}) - usando valores padrao.`
+        );
+      }
+
+      return null;
+    }
   }
 };
 
@@ -166,10 +249,7 @@ const applyPersistedRuntimeConfig = (persisted) => {
     });
   }
 
-  if (
-    persisted.holyricsConfig &&
-    typeof persisted.holyricsConfig === "object"
-  ) {
+  if (persisted.holyricsConfig && typeof persisted.holyricsConfig === "object") {
     holyricsConfig = sanitizeHolyricsConfig({
       ...holyricsConfig,
       ...persisted.holyricsConfig,
@@ -200,10 +280,14 @@ const applyPersistedRuntimeConfig = (persisted) => {
     channelStates = nextStates;
   }
 
+  if (Array.isArray(persisted.presets)) {
+    presets = persisted.presets
+      .filter((item) => isPlainObject(item))
+      .map((item) => sanitizePreset(item, item));
+  }
+
   if (typeof persisted.lastHolyricsContentChannel === "string") {
-    lastHolyricsContentChannel = getSafeChannel(
-      persisted.lastHolyricsContentChannel,
-    );
+    lastHolyricsContentChannel = getSafeChannel(persisted.lastHolyricsContentChannel);
   }
 };
 
@@ -275,10 +359,7 @@ const roomFor = (channel) => `channel:${getSafeChannel(channel)}`;
 const emitState = (channel) => {
   const safeChannel = getSafeChannel(channel);
   const state = channelStates[safeChannel];
-  io.to(roomFor(safeChannel)).emit(
-    "lyrics:update",
-    toClientPayload(state, safeChannel),
-  );
+  io.to(roomFor(safeChannel)).emit("lyrics:update", toClientPayload(state, safeChannel));
 };
 
 const resolveBibleInfoForChannel = (channel, bibleInfo) => {
@@ -298,7 +379,14 @@ const resolveBibleInfoForChannel = (channel, bibleInfo) => {
 // `texto` aqui, ou ele sera transformado de novo (dobrando o agrupamento).
 const applyUpdate = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   const safeChannel = getSafeChannel(channel);
-  const transformedText = transformTextByChannel(texto, safeChannel);
+  // `texto === undefined` significa "update so de estilo" (ex: ocultar
+  // canal, aplicar preset, enviar estilo para todos) - nesse caso o texto
+  // atual do canal deve ser preservado, nunca transformado. Passar
+  // `undefined` para `transformTextByChannel`/`applyMusicLineBreak` faria o
+  // agrupamento de linhas da musica tratar isso como texto vazio e apagar a
+  // letra atual do canal `music`.
+  const transformedText =
+    texto === undefined ? undefined : transformTextByChannel(texto, safeChannel);
   const currentState = channelStates[safeChannel];
   const { changed, state } = mergeState(currentState, {
     texto: transformedText,
@@ -324,14 +412,7 @@ const applyUpdate = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   };
 };
 
-const mirrorToDefault = ({
-  texto,
-  estilo,
-  source,
-  channel,
-  bibleInfo,
-  type,
-}) => {
+const mirrorToDefault = ({ texto, estilo, source, channel, bibleInfo, type }) => {
   if (channel === CHANNELS.DEFAULT) {
     return;
   }
@@ -346,14 +427,7 @@ const mirrorToDefault = ({
   });
 };
 
-const applyUpdateMany = ({
-  texto,
-  estilo,
-  source,
-  channels,
-  bibleInfo,
-  type,
-}) => {
+const applyUpdateMany = ({ texto, estilo, source, channels, bibleInfo, type }) => {
   const targetChannels = (channels || [CHANNELS.DEFAULT]).map(getSafeChannel);
   const uniqueChannels = [...new Set(targetChannels)];
   const results = [];
@@ -378,11 +452,7 @@ const resolveIncomingHolyricsChannel = ({ type, text }) => {
   const resolvedChannel = resolveHolyricsChannel(type);
   const isEmptyText = String(text || "").trim().length === 0;
 
-  if (
-    resolvedChannel === CHANNELS.DEFAULT &&
-    isEmptyText &&
-    lastHolyricsContentChannel
-  ) {
+  if (resolvedChannel === CHANNELS.DEFAULT && isEmptyText && lastHolyricsContentChannel) {
     return lastHolyricsContentChannel;
   }
 
@@ -421,10 +491,7 @@ const restartHolyricsPull = () => {
       holyricsDiagnostics.lastType = type || null;
       holyricsDiagnostics.lastChannel = holyricsChannel;
       try {
-        holyricsDiagnostics.lastResponsePreview = JSON.stringify(raw).slice(
-          0,
-          400,
-        );
+        holyricsDiagnostics.lastResponsePreview = JSON.stringify(raw).slice(0, 400);
       } catch (_error) {
         holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
       }
@@ -436,12 +503,29 @@ const restartHolyricsPull = () => {
   });
 };
 
+// Restaura estilos, layout e configuracao do Holyrics para os valores
+// padrao (os mesmos que o servidor usaria numa instalacao nova) e persiste
+// esse estado - usado quando a configuracao salva esta corrompida/confusa e
+// o operador so quer "comecar do zero" com um clique.
+const resetRuntimeConfigToDefaults = async () => {
+  channelStates = createInitialChannelStates();
+  layoutConfig = sanitizeLayoutConfig({});
+  holyricsConfig = buildHolyricsConfigFromEnv();
+  lastHolyricsContentChannel = null;
+
+  restartHolyricsPull();
+
+  for (const channel of Object.values(CHANNELS)) {
+    emitState(channel);
+  }
+
+  await persistRuntimeConfigNow();
+};
+
 const persistedRuntimeConfig = await loadPersistedRuntimeConfig();
 if (persistedRuntimeConfig) {
   applyPersistedRuntimeConfig(persistedRuntimeConfig);
-  console.info(
-    `[runtime-config] Configuracao carregada de ${runtimeConfigPath}`,
-  );
+  console.info(`[runtime-config] Configuracao carregada (fonte: ${runtimeConfigStatus.source}).`);
 }
 
 restartHolyricsPull();
@@ -451,10 +535,7 @@ io.on("connection", (socket) => {
   const room = roomFor(requestedChannel);
   socket.join(room);
 
-  socket.emit(
-    "lyrics:update",
-    toClientPayload(channelStates[requestedChannel], requestedChannel),
-  );
+  socket.emit("lyrics:update", toClientPayload(channelStates[requestedChannel], requestedChannel));
 
   socket.on("lyrics:set", (payload, ack) => {
     const target = String(payload?.target || "default").toLowerCase();
@@ -503,9 +584,7 @@ app.get("/estado/all", (_req, res) => {
 });
 
 app.post("/letra", (req, res) => {
-  const target = String(
-    req.body?.target || req.body?.channel || "default",
-  ).toLowerCase();
+  const target = String(req.body?.target || req.body?.channel || "default").toLowerCase();
 
   const channels =
     target === "all"
@@ -527,9 +606,7 @@ app.post("/letra", (req, res) => {
     ok: true,
     changed: results.some((item) => item.changed),
     channels,
-    state: channels.map((channel) =>
-      toClientPayload(channelStates[channel], channel),
-    ),
+    state: channels.map((channel) => toClientPayload(channelStates[channel], channel)),
   });
 });
 
@@ -542,8 +619,7 @@ app.post("/holyrics/webhook", (req, res) => {
     req.body?.current?.text ||
     "";
 
-  const holyricsType =
-    req.body?.type || req.body?.current?.type || req.body?.slide?.type || "";
+  const holyricsType = req.body?.type || req.body?.current?.type || req.body?.slide?.type || "";
   const channel = resolveIncomingHolyricsChannel({
     type: holyricsType,
     text: texto,
@@ -604,6 +680,14 @@ app.get("/holyrics/diagnostics", (_req, res) => {
   });
 });
 
+app.get("/runtime-config/status", (_req, res) => {
+  res.json({
+    ok: true,
+    source: runtimeConfigStatus.source,
+    warning: runtimeConfigStatus.warning,
+  });
+});
+
 app.post("/holyrics/config", (req, res) => {
   holyricsConfig = sanitizeHolyricsConfig({
     ...holyricsConfig,
@@ -660,12 +744,117 @@ app.post("/layout/config", (req, res) => {
 });
 
 app.post(
+  "/runtime-config/reset",
+  asyncHandler(async (_req, res) => {
+    await resetRuntimeConfigToDefaults();
+    runtimeConfigStatus = { source: "file", warning: null };
+
+    res.json({
+      ok: true,
+      config: buildPersistedRuntimeConfig(),
+    });
+  })
+);
+
+app.get("/presets", (_req, res) => {
+  res.json({ ok: true, presets });
+});
+
+app.post("/presets", (req, res) => {
+  const preset = sanitizePreset({ name: req.body?.name, style: req.body?.style });
+  presets = [...presets, preset];
+  schedulePersistRuntimeConfig();
+
+  res.json({ ok: true, preset });
+});
+
+app.put("/presets/:id", (req, res) => {
+  const index = presets.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Preset nao encontrado." });
+  }
+
+  const updated = sanitizePreset(req.body || {}, presets[index]);
+  presets = [...presets.slice(0, index), updated, ...presets.slice(index + 1)];
+  schedulePersistRuntimeConfig();
+
+  res.json({ ok: true, preset: updated });
+});
+
+app.delete("/presets/:id", (req, res) => {
+  const exists = presets.some((item) => item.id === req.params.id);
+  if (!exists) {
+    return res.status(404).json({ ok: false, message: "Preset nao encontrado." });
+  }
+
+  presets = presets.filter((item) => item.id !== req.params.id);
+  schedulePersistRuntimeConfig();
+
+  res.json({ ok: true });
+});
+
+app.post("/presets/:id/apply", (req, res) => {
+  const preset = presets.find((item) => item.id === req.params.id);
+  if (!preset) {
+    return res.status(404).json({ ok: false, message: "Preset nao encontrado." });
+  }
+
+  const target = String(req.body?.target || "default").toLowerCase();
+  const channels =
+    target === "all"
+      ? [CHANNELS.DEFAULT, CHANNELS.MUSIC, CHANNELS.BIBLE]
+      : [getSafeChannel(target)];
+
+  // So estilo - `texto` fica de fora do payload de proposito, entao
+  // `applyUpdateMany` preserva o texto atual de cada canal (ver o fix de
+  // `applyUpdate` acima para updates so-de-estilo).
+  const results = applyUpdateMany({
+    estilo: preset.style,
+    source: "preset-apply",
+    channels,
+  });
+
+  if (results.some((item) => item.changed)) {
+    schedulePersistRuntimeConfig();
+  }
+
+  res.json({ ok: true, changed: results.some((item) => item.changed), channels });
+});
+
+app.post("/presets/import", (req, res) => {
+  const incoming = Array.isArray(req.body?.presets) ? req.body.presets : null;
+  if (!incoming) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "Corpo invalido: esperado { presets: [] }." });
+  }
+
+  const imported = [];
+  const errors = [];
+
+  incoming.forEach((item, index) => {
+    if (!isPlainObject(item) || !isPlainObject(item.style)) {
+      errors.push({ index, message: "Item invalido: esperado um objeto com 'style'." });
+      return;
+    }
+
+    const preset = sanitizePreset({ name: item.name, style: item.style });
+    presets = [...presets, preset];
+    imported.push(preset);
+  });
+
+  if (imported.length > 0) {
+    schedulePersistRuntimeConfig();
+  }
+
+  res.json({ ok: errors.length === 0, imported, errors });
+});
+
+app.post(
   "/holyrics/pull-now",
   asyncHandler(async (_req, res) => {
     if (!holyricsRunner) {
-      return res
-        .status(503)
-        .json({ ok: false, message: "Integracao Holyrics indisponivel." });
+      return res.status(503).json({ ok: false, message: "Integracao Holyrics indisponivel." });
     }
 
     holyricsDiagnostics.lastAttemptAt = new Date().toISOString();
@@ -686,9 +875,7 @@ app.post(
 
     if (result?.responseData !== undefined) {
       try {
-        holyricsDiagnostics.lastResponsePreview = JSON.stringify(
-          result.responseData,
-        ).slice(0, 400);
+        holyricsDiagnostics.lastResponsePreview = JSON.stringify(result.responseData).slice(0, 400);
       } catch (_error) {
         holyricsDiagnostics.lastResponsePreview = "[unserializable_response]";
       }
@@ -699,7 +886,7 @@ app.post(
     }
 
     return res.json({ ok: true, result, diagnostics: holyricsDiagnostics });
-  }),
+  })
 );
 
 // Qualquer rota nao encontrada volta como JSON (nao a pagina HTML padrao do
@@ -727,8 +914,7 @@ const resolveServerUrls = (listenHost, listenPort) => {
   const normalizedHost = String(listenHost || "")
     .trim()
     .toLowerCase();
-  const onAllInterfaces =
-    normalizedHost === "0.0.0.0" || normalizedHost === "::";
+  const onAllInterfaces = normalizedHost === "0.0.0.0" || normalizedHost === "::";
   const urls = new Set();
 
   if (onAllInterfaces) {
@@ -752,7 +938,7 @@ const resolveServerUrls = (listenHost, listenPort) => {
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
     console.error(
-      `[server] ${host}:${port} ja esta em uso. Encerre o processo antigo ou altere HOST/PORT no .env.`,
+      `[server] ${host}:${port} ja esta em uso. Encerre o processo antigo ou altere HOST/PORT no .env.`
     );
     return;
   }

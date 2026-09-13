@@ -1,4 +1,4 @@
-﻿const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 export const CHANNELS = {
   DEFAULT: "default",
@@ -30,6 +30,7 @@ const defaultStyle = {
   bibleVersionFontSize: 32,
   bibleReferenceFontSize: 40,
   fade: false,
+  visible: true,
 };
 
 const validBackgroundModes = new Set(["transparent", "solid", "gradient"]);
@@ -108,11 +109,7 @@ export const buildRenderStyle = (styleInput = {}) => {
     ...(styleInput || {}),
   };
 
-  const fontSize = clamp(
-    Number(merged.fontSize) || defaultStyle.fontSize,
-    16,
-    220,
-  );
+  const fontSize = clamp(Number(merged.fontSize) || defaultStyle.fontSize, 16, 220);
   const shadowIntensity = clamp(Number(merged.shadowIntensity) || 0, 0, 100);
   const shadowEnabled = Boolean(merged.shadowEnabled);
 
@@ -122,49 +119,40 @@ export const buildRenderStyle = (styleInput = {}) => {
     ? `0px 2px ${shadowBlur}px rgba(0, 0, 0, ${shadowAlpha}), 0px 0px 2px rgba(0, 0, 0, 0.45)`
     : "none";
 
-  const backgroundMode = validBackgroundModes.has(
-    String(merged.backgroundMode || "").toLowerCase(),
-  )
+  const backgroundMode = validBackgroundModes.has(String(merged.backgroundMode || "").toLowerCase())
     ? String(merged.backgroundMode).toLowerCase()
     : merged.backgroundTransparent
       ? "transparent"
       : "solid";
 
-  const backgroundColor = normalizeHexColor(
-    merged.backgroundColor,
-    defaultStyle.backgroundColor,
-  );
-  const gradientColor = normalizeHexColor(
-    merged.gradientColor,
-    backgroundColor,
-  );
+  const backgroundColor = normalizeHexColor(merged.backgroundColor, defaultStyle.backgroundColor);
+  const gradientColor = normalizeHexColor(merged.gradientColor, backgroundColor);
   const gradientOpacity = clamp(Number(merged.gradientOpacity) || 0, 0, 100);
   const gradientSpread = clamp(Number(merged.gradientSpread) || 0, 15, 100);
   const gradientDirection = validGradientDirections.has(
-    String(merged.gradientDirection || "").toLowerCase(),
+    String(merged.gradientDirection || "").toLowerCase()
   )
     ? String(merged.gradientDirection).toLowerCase()
     : defaultStyle.gradientDirection;
   const bibleVersionPosition = validBibleMetaPositions.has(
-    String(merged.bibleVersionPosition || "").toLowerCase(),
+    String(merged.bibleVersionPosition || "").toLowerCase()
   )
     ? String(merged.bibleVersionPosition).toLowerCase()
     : defaultStyle.bibleVersionPosition;
   const bibleReferencePosition = validBibleMetaPositions.has(
-    String(merged.bibleReferencePosition || "").toLowerCase(),
+    String(merged.bibleReferencePosition || "").toLowerCase()
   )
     ? String(merged.bibleReferencePosition).toLowerCase()
     : defaultStyle.bibleReferencePosition;
   const bibleVersionFontSize = clamp(
     Number(merged.bibleVersionFontSize) || defaultStyle.bibleVersionFontSize,
     14,
-    120,
+    120
   );
   const bibleReferenceFontSize = clamp(
-    Number(merged.bibleReferenceFontSize) ||
-      defaultStyle.bibleReferenceFontSize,
+    Number(merged.bibleReferenceFontSize) || defaultStyle.bibleReferenceFontSize,
     16,
-    140,
+    140
   );
 
   const rgb = hexToRgb(gradientColor);
@@ -187,10 +175,7 @@ export const buildRenderStyle = (styleInput = {}) => {
     color: String(merged.color || defaultStyle.color),
     fontSize,
     fontFamily,
-    fontImportUrl:
-      typeof merged.fontImportUrl === "string"
-        ? merged.fontImportUrl.trim()
-        : "",
+    fontImportUrl: typeof merged.fontImportUrl === "string" ? merged.fontImportUrl.trim() : "",
     textAlign: ["left", "center", "right", "justify"].includes(merged.textAlign)
       ? merged.textAlign
       : defaultStyle.textAlign,
@@ -212,6 +197,7 @@ export const buildRenderStyle = (styleInput = {}) => {
     bibleReferenceFontSize,
     renderBackground,
     fade: Boolean(merged.fade),
+    visible: merged.visible !== false,
   };
 };
 
@@ -240,7 +226,7 @@ export const mergeState = (currentState, input = {}) => {
   // passou nem um nem outro (ex: update so de estilo), mantem o valor atual.
   const incomingTextoOriginal = normalizeText(
     input.textoOriginal !== undefined ? input.textoOriginal : input.texto,
-    currentState.textoOriginal,
+    currentState.textoOriginal
   );
 
   const incomingStyle = buildRenderStyle({
@@ -286,8 +272,7 @@ export const mergeState = (currentState, input = {}) => {
     currentState.texto !== nextState.texto ||
     currentState.textoOriginal !== nextState.textoOriginal ||
     (currentState.type || "") !== nextState.type ||
-    JSON.stringify(currentState.bibleInfo || {}) !==
-      JSON.stringify(nextState.bibleInfo || {}) ||
+    JSON.stringify(currentState.bibleInfo || {}) !== JSON.stringify(nextState.bibleInfo || {}) ||
     JSON.stringify(currentState.estilo) !== JSON.stringify(nextState.estilo);
 
   return {
@@ -298,9 +283,7 @@ export const mergeState = (currentState, input = {}) => {
 
 export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
   const style = state.estilo;
-  const renderBackgroundColor = style.backgroundTransparent
-    ? "transparent"
-    : style.backgroundColor;
+  const renderBackgroundColor = style.backgroundTransparent ? "transparent" : style.backgroundColor;
   const bibleInfo = sanitizeBibleInfo(state.bibleInfo);
 
   return {
@@ -330,6 +313,7 @@ export const toClientPayload = (state, channel = CHANNELS.DEFAULT) => {
       renderBackground: style.renderBackground,
       renderBackgroundColor,
       fade: style.fade,
+      visible: style.visible,
     },
     meta: {
       updatedAt: state.updatedAt,

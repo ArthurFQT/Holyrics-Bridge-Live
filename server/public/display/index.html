@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
@@ -53,6 +53,22 @@
 
       #overlay.visible {
         opacity: 1;
+      }
+
+      /* `style-hidden`: canal ocultado manualmente no painel (texto
+         preservado no servidor, so a exibicao e desligada aqui).
+         `connection-lost`: fallback de reconexao (ver script) - some so
+         depois de um tempo sem conexao, para nao piscar em quedas curtas. */
+      body.style-hidden #stage,
+      body.style-hidden .bible-meta,
+      body.connection-lost #stage,
+      body.connection-lost .bible-meta {
+        opacity: 0 !important;
+      }
+
+      #stage,
+      .bible-meta {
+        transition: opacity 200ms linear;
       }
 
       #lyric {
@@ -181,6 +197,57 @@
         query: { channel },
       });
 
+      // Em uma queda de conexao, mantemos o ultimo estado visivel na tela
+      // (nada e limpo em `disconnect`/`connect_error`) para nao piscar em
+      // quedas curtas e comuns. So depois de CONNECTION_FALLBACK_MS sem
+      // reconectar e que o texto e ocultado, para nao travar a tela
+      // indefinidamente numa queda longa. Ao reconectar, o servidor sempre
+      // reenvia o estado atual do canal (todo novo `connection` recebe um
+      // `lyrics:update`), entao nao ha necessidade de solicitar nada aqui.
+      const CONNECTION_FALLBACK_MS = 15000;
+      let connectionFallbackTimer = null;
+
+      const clearConnectionFallbackTimer = () => {
+        if (connectionFallbackTimer) {
+          clearTimeout(connectionFallbackTimer);
+          connectionFallbackTimer = null;
+        }
+      };
+
+      const armConnectionFallbackTimer = () => {
+        clearConnectionFallbackTimer();
+        connectionFallbackTimer = setTimeout(() => {
+          console.debug(
+            `[display] sem reconexao apos ${CONNECTION_FALLBACK_MS}ms - ocultando texto por seguranca`
+          );
+          document.body.classList.add("connection-lost");
+        }, CONNECTION_FALLBACK_MS);
+      };
+
+      socket.on("connect", () => {
+        console.debug("[display] socket conectado");
+        clearConnectionFallbackTimer();
+        document.body.classList.remove("connection-lost");
+      });
+
+      socket.on("disconnect", (reason) => {
+        console.debug("[display] socket desconectado:", reason);
+        armConnectionFallbackTimer();
+      });
+
+      socket.on("connect_error", (error) => {
+        console.debug("[display] erro ao conectar:", error?.message || error);
+        armConnectionFallbackTimer();
+      });
+
+      // Eventos de reconexao (`reconnect`, `reconnect_attempt`, etc) sao
+      // emitidos pelo Manager (`socket.io`), nao pela instancia `socket`.
+      socket.io.on("reconnect", (attempt) => {
+        console.debug(`[display] reconectado (tentativa ${attempt})`);
+        clearConnectionFallbackTimer();
+        document.body.classList.remove("connection-lost");
+      });
+
       const ensureGoogleFontImport = (url) => {
         if (!url) {
           return;
@@ -191,9 +258,7 @@
           return;
         }
 
-        let link = document.querySelector(
-          `link[data-google-font-import="${trimmedUrl}"]`,
-        );
+        let link = document.querySelector(`link[data-google-font-import="${trimmedUrl}"]`);
         if (!link) {
           link = document.createElement("link");
           link.rel = "stylesheet";
@@ -212,18 +277,15 @@
         lyricNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
         bibleVersionNode.style.color = style.color || "#ffffff";
         bibleReferenceNode.style.color = style.color || "#ffffff";
-        bibleVersionNode.style.fontFamily =
-          style.fontFamily || "Arial, sans-serif";
-        bibleReferenceNode.style.fontFamily =
-          style.fontFamily || "Arial, sans-serif";
+        bibleVersionNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
+        bibleReferenceNode.style.fontFamily = style.fontFamily || "Arial, sans-serif";
         bibleVersionNode.style.textShadow = style.textShadow || "none";
         bibleReferenceNode.style.textShadow = style.textShadow || "none";
         bibleVersionNode.style.fontSize = `${Number(style.bibleVersionFontSize) || 32}px`;
         bibleReferenceNode.style.fontSize = `${Number(style.bibleReferenceFontSize) || 40}px`;
         overlayNode.style.background =
-          style.renderBackground ||
-          style.renderBackgroundColor ||
-          "transparent";
+          style.renderBackground || style.renderBackgroundColor || "transparent";
+        document.body.classList.toggle("style-hidden", style.visible === false);
       };
 
       const META_POSITION_CLASSES = [
@@ -236,23 +298,17 @@
       ];
 
       const applyMetaPosition = (node, position = "top-right") => {
-        META_POSITION_CLASSES.forEach((className) =>
-          node.classList.remove(className),
-        );
+        META_POSITION_CLASSES.forEach((className) => node.classList.remove(className));
         node.classList.add(`meta-${position}`);
       };
 
       const isBottomMetaNode = (node) =>
         META_POSITION_CLASSES.some(
-          (className) =>
-            className.startsWith("meta-bottom-") &&
-            node.classList.contains(className),
+          (className) => className.startsWith("meta-bottom-") && node.classList.contains(className)
         );
 
       const getMetaPositionClass = (node) =>
-        META_POSITION_CLASSES.find((className) =>
-          node.classList.contains(className),
-        ) || "";
+        META_POSITION_CLASSES.find((className) => node.classList.contains(className)) || "";
 
       const updateMetaLayout = () => {
         const allMetaNodes = [bibleVersionNode, bibleReferenceNode];
@@ -261,7 +317,7 @@
         }
 
         const bottomVisibleNodes = allMetaNodes.filter(
-          (node) => node.classList.contains("show") && isBottomMetaNode(node),
+          (node) => node.classList.contains("show") && isBottomMetaNode(node)
         );
 
         if (bottomVisibleNodes.length === 0) {
@@ -295,10 +351,7 @@
           }
         }
 
-        stageNode.style.setProperty(
-          "--safe-bottom",
-          `${Math.ceil(safeBottomPx)}px`,
-        );
+        stageNode.style.setProperty("--safe-bottom", `${Math.ceil(safeBottomPx)}px`);
       };
 
       const hideBibleMeta = () => {
@@ -320,17 +373,12 @@
         const version = String(info.version || "").trim();
         const reference = String(info.reference || "").trim();
 
-        const showVersion =
-          style.showBibleVersion !== false && version.length > 0;
-        const showReference =
-          style.showBibleReference !== false && reference.length > 0;
+        const showVersion = style.showBibleVersion !== false && version.length > 0;
+        const showReference = style.showBibleReference !== false && reference.length > 0;
 
         if (showVersion) {
           bibleVersionNode.textContent = version;
-          applyMetaPosition(
-            bibleVersionNode,
-            style.bibleVersionPosition || "top-right",
-          );
+          applyMetaPosition(bibleVersionNode, style.bibleVersionPosition || "top-right");
           bibleVersionNode.classList.add("show");
         } else {
           bibleVersionNode.classList.remove("show");
@@ -339,10 +387,7 @@
 
         if (showReference) {
           bibleReferenceNode.textContent = reference;
-          applyMetaPosition(
-            bibleReferenceNode,
-            style.bibleReferencePosition || "bottom-right",
-          );
+          applyMetaPosition(bibleReferenceNode, style.bibleReferencePosition || "bottom-right");
           bibleReferenceNode.classList.add("show");
         } else {
           bibleReferenceNode.classList.remove("show");
