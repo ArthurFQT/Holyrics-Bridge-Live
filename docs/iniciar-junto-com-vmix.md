@@ -16,14 +16,39 @@ Em ambos os casos, o script sobe o projeto com `npm run dev` (o mesmo
 comando que voce já usa manualmente) — nada de configuracao nova, so
 automatiza o "abrir o terminal e digitar o comando".
 
-## Pre-requisitos
+## Instalando o projeto numa maquina nova (ex: o PC do vMix)
 
-- Node.js e as dependencias do projeto ja instaladas (`npm install` na
-  raiz), do jeito que voce ja usa hoje.
-- Teste primeiro rodando `scripts\windows\iniciar-bridge.bat` manualmente
-  (de duplo-clique) e confirme que abre uma janela com os logs do `npm run
-dev` e que `http://localhost:3001/health` responde. So depois de
-  confirmar que isso funciona, parta para a automatizacao.
+Se a maquina onde o vMix roda ainda nao tem o projeto (o mais comum, ja que
+normalmente e uma maquina diferente da que voce usa para desenvolver),
+siga estes passos nela primeiro:
+
+1. **Levar o projeto para a maquina**. Forma mais simples, sem precisar
+   configurar Git/SSH nessa maquina: acesse
+   `https://github.com/ArthurFQT/Holyrics-Bridge-Live` no navegador dela ->
+   botao verde "Code" -> "Download ZIP" -> extraia em algum lugar, ex.
+   `C:\Holyrics-Bridge-Live`. Se preferir usar Git, `git clone
+https://github.com/ArthurFQT/Holyrics-Bridge-Live.git` funciona igual.
+2. **Instalar o Node.js**, se ainda nao tiver - baixe a versao LTS em
+   [nodejs.org](https://nodejs.org) e instale normalmente.
+3. **Instalar as dependencias**: abra o Prompt de Comando dentro da pasta
+   do projeto e rode:
+   ```
+   npm install
+   ```
+4. **Configurar o `.env` do backend**: copie `server\.env.example` para
+   `server\.env` e ajuste `HOLYRICS_HOST`/`HOLYRICS_PORT` para o IP/porta
+   do Holyrics (se o Holyrics estiver na mesma maquina do vMix, pode deixar
+   `127.0.0.1`). O `.env` do painel (`control-panel`) nao precisa de
+   nenhum ajuste - ele detecta o backend sozinho (ver
+   [Guia de cenarios reais](guia-cenarios-reais.md)).
+5. **Testar manualmente**: de duplo-clique em `scripts\windows\iniciar-bridge.bat`
+   (dentro da copia do projeto **nessa maquina**) e confirme que abre uma
+   janela com os logs do `npm run dev` e que
+   `http://localhost:3001/health` responde no navegador.
+
+So depois de confirmar que isso funciona manualmente e que parta para a
+automatizacao (Opcao A ou B abaixo) - usando sempre os caminhos da copia do
+projeto **dessa maquina**, nao da maquina de desenvolvimento.
 
 ## Opcao A - Iniciar no login do Windows
 
