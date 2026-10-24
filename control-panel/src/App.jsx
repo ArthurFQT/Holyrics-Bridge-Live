@@ -17,7 +17,13 @@ import PresetManager from "./components/PresetManager";
 import VMixUrls from "./components/VMixUrls";
 import { parseBibleInfo, parseType } from "./utils/bibleInfo";
 import { fetchJson } from "./utils/fetchJson";
-import { buildStylePayload, ensureGoogleFontImport, parseServerStyle } from "./utils/style";
+import {
+  buildFontFamilyFromGoogleFont,
+  buildStylePayload,
+  ensureGoogleFontImport,
+  extractGoogleFontFamily,
+  parseServerStyle,
+} from "./utils/style";
 
 // Por padrao, o backend e inferido a partir do host usado para abrir o
 // proprio painel (ex: painel aberto em `http://192.168.0.6:5173` -> backend
@@ -52,6 +58,11 @@ function App() {
   const [layoutConfig, setLayoutConfig] = useState(initialLayoutConfig);
   const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
   const [presets, setPresets] = useState([]);
+  const [holyricsDiscovery, setHolyricsDiscovery] = useState({
+    loading: false,
+    candidates: null,
+    scannedHosts: 0,
+  });
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     title: "",
@@ -295,12 +306,21 @@ function App() {
   }, [currentStyle.fontImportUrl]);
 
   const handleStyleChange = (field, value) => {
-    updateDraft(selectedChannel, (current) => ({
-      style: {
-        ...current.style,
-        [field]: value,
-      },
-    }));
+    updateDraft(selectedChannel, (current) => {
+      const nextStyle = { ...current.style, [field]: value };
+
+      // Cola a URL do Google Fonts e o nome da fonte e detectado sozinho -
+      // antes disso o operador tinha que copiar o nome de dentro da URL e
+      // digitar de novo no campo "Fonte personalizada".
+      if (field === "fontImportUrl") {
+        const detectedFamily = extractGoogleFontFamily(value);
+        if (detectedFamily) {
+          nextStyle.fontFamily = buildFontFamilyFromGoogleFont(detectedFamily);
+        }
+      }
+
+      return { style: nextStyle };
+    });
   };
 
   const handleTextChange = (value) => {
@@ -505,6 +525,45 @@ function App() {
     } catch (error) {
       setStatus(`Falha ao executar leitura Holyrics: ${error.message}`);
     }
+  };
+
+  const handleDiscoverHolyrics = async () => {
+    setHolyricsDiscovery({ loading: true, candidates: null, scannedHosts: 0 });
+    setStatus("Procurando Holyrics na rede local (pode levar alguns segundos)...");
+
+    try {
+      const data = await fetchJson(`${BACKEND_URL}/holyrics/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          port: Number(holyricsConfig.port),
+          path: holyricsConfig.path,
+          method: holyricsConfig.method,
+          token: holyricsConfig.token,
+          tokenHeader: holyricsConfig.tokenHeader,
+        }),
+      });
+
+      const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+      setHolyricsDiscovery({
+        loading: false,
+        candidates,
+        scannedHosts: data?.scannedHosts || 0,
+      });
+      setStatus(
+        candidates.length > 0
+          ? `${candidates.length} maquina(s) encontrada(s) respondendo como Holyrics.`
+          : `Nenhuma maquina encontrada (${data?.scannedHosts || 0} testadas). Confira se o WebService Plugin do Holyrics esta ativo.`
+      );
+    } catch (error) {
+      setHolyricsDiscovery({ loading: false, candidates: null, scannedHosts: 0 });
+      setStatus(`Falha ao procurar Holyrics na rede: ${error.message}`);
+    }
+  };
+
+  const handleUseDiscoveredHolyricsHost = (host) => {
+    handleHolyricsConfigFieldChange("host", host);
+    setStatus(`IP ${host} selecionado. Clique em "Salvar configuracao Holyrics" para aplicar.`);
   };
 
   const handleBreakEveryLinesChange = (breakEveryLines) => {
@@ -781,6 +840,9 @@ function App() {
         onFieldChange={handleHolyricsConfigFieldChange}
         onSubmit={handleHolyricsConfigSave}
         onPullNow={triggerHolyricsPull}
+        discovery={holyricsDiscovery}
+        onDiscover={handleDiscoverHolyrics}
+        onUseDiscoveredHost={handleUseDiscoveredHolyricsHost}
       />
 
       <HolyricsDiagnostics

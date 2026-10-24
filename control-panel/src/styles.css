@@ -807,6 +807,42 @@ code {
   color: #ff8fa8;
 }
 
+.font-import-hint {
+  margin: -4px 0 0;
+  font-size: 0.82rem;
+  color: #93c9ff;
+}
+
+.font-import-hint.warning {
+  color: #ff8fa8;
+}
+
+.network-discovery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.network-discovery-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.network-discovery-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 6px 6px 6px 12px;
+}
+
 .diagnostics-preview {
   margin-top: 16px;
   display: flex;

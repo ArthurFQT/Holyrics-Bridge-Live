@@ -1,6 +1,14 @@
 import { CheckboxField, NumberField, SelectField, TextField } from "./fields";
 
-const HolyricsConfigForm = ({ holyricsConfig, onFieldChange, onSubmit, onPullNow }) => (
+const HolyricsConfigForm = ({
+  holyricsConfig,
+  onFieldChange,
+  onSubmit,
+  onPullNow,
+  discovery,
+  onDiscover,
+  onUseDiscoveredHost,
+}) => (
   <section className="glass-card compact">
     <h2>Integracao Holyrics</h2>
     <p className="subtitle">Configure IP, porta, token e modo de leitura da API.</p>
@@ -17,6 +25,37 @@ const HolyricsConfigForm = ({ holyricsConfig, onFieldChange, onSubmit, onPullNow
         value={holyricsConfig.port}
         onChange={(event) => onFieldChange("port", event.target.value)}
       />
+
+      <div className="field field-full network-discovery">
+        <button type="button" className="ghost" onClick={onDiscover} disabled={discovery.loading}>
+          {discovery.loading ? "Procurando..." : "Procurar Holyrics na rede"}
+        </button>
+
+        {discovery.candidates !== null && !discovery.loading && (
+          <p className="tips">
+            {discovery.candidates.length > 0
+              ? `Encontrado(s) (testamos ${discovery.scannedHosts} maquina(s) na rede):`
+              : `Nenhuma maquina respondeu como Holyrics (testamos ${discovery.scannedHosts} maquina(s) na rede). Confira se o WebService Plugin esta ativo.`}
+          </p>
+        )}
+
+        {discovery.candidates?.length > 0 && (
+          <ul className="network-discovery-list">
+            {discovery.candidates.map((host) => (
+              <li key={host}>
+                <code>{host}</code>
+                <button
+                  type="button"
+                  className="ghost quiet"
+                  onClick={() => onUseDiscoveredHost(host)}
+                >
+                  Usar este IP
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <TextField
         label="Path da API"

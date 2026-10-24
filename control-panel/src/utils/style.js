@@ -93,6 +93,45 @@ export const getCustomFontInputValue = (fontFamily) => {
   return FONT_OPTIONS.some((option) => option.value === selected) ? "" : selected;
 };
 
+// Extrai o nome da familia de uma URL do Google Fonts (ex: a URL copiada na
+// aba "Embed" do site, algo como
+// `https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single:wght@400&display=swap`)
+// para que o painel preencha `fontFamily` sozinho - sem isso, o operador
+// tinha que copiar o nome da fonte de dentro da URL e digitar de novo em
+// outro campo, repetindo a mesma informacao duas vezes.
+export const extractGoogleFontFamily = (url) => {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (_error) {
+    return "";
+  }
+
+  const familyParam = parsed.searchParams.get("family");
+  if (!familyParam) {
+    return "";
+  }
+
+  // O primeiro `family` pode trazer pesos/estilos depois de ":" (ex:
+  // "Bitcount+Prop+Single:wght@400;700") - so o nome antes disso importa
+  // para o `font-family` do CSS.
+  const rawName = familyParam.split(":")[0];
+  return rawName.replace(/\+/g, " ").trim();
+};
+
+export const buildFontFamilyFromGoogleFont = (fontName) => {
+  const trimmed = String(fontName || "").trim();
+  return trimmed ? `"${trimmed}", sans-serif` : "";
+};
+
+export const isLikelyGoogleFontsUrl = (url) =>
+  /^https:\/\/fonts\.googleapis\.com\//i.test(String(url || "").trim());
+
 export const ensureGoogleFontImport = (url) => {
   if (typeof document === "undefined" || !url) {
     return;
