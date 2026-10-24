@@ -1,8 +1,6 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +14,8 @@ import {
   sanitizeHolyricsText,
   startHolyricsPull,
 } from "./holyricsClient.js";
+import { discoverHolyricsHosts, resolveServerUrls } from "./network.js";
+import { createRuntimeConfigStore, isPlainObject } from "./runtimeConfig.js";
 import {
   buildRenderStyle,
   CHANNELS,
@@ -65,10 +65,11 @@ const io = new Server(server, {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const runtimeConfigPath = path.resolve(__dirname, "../data/runtime-config.json");
-const runtimeConfigBackupPath = path.resolve(__dirname, "../data/runtime-config.backup.json");
-const runtimeConfigTmpPath = `${runtimeConfigPath}.tmp`;
-const RUNTIME_CONFIG_VERSION = 1;
+const runtimeConfigStore = createRuntimeConfigStore({
+  filePath: path.resolve(__dirname, "../data/runtime-config.json"),
+  backupPath: path.resolve(__dirname, "../data/runtime-config.backup.json"),
+  version: 1,
+});
 
 let runtimeConfigStatus = { source: "defaults", warning: null };
 
@@ -105,26 +106,15 @@ const holyricsDiagnostics = {
   lastChannel: null,
 };
 
-const buildHolyricsConfigFromEnv = () =>
-  sanitizeHolyricsConfig({
-    host: process.env.HOLYRICS_HOST,
-    port: process.env.HOLYRICS_PORT,
-    path: process.env.HOLYRICS_PATH,
-    method: process.env.HOLYRICS_METHOD,
-    token: process.env.HOLYRICS_TOKEN,
-    tokenHeader: process.env.HOLYRICS_TOKEN_HEADER,
-    textPath: process.env.HOLYRICS_TEXT_PATH,
-    pullEnabled: process.env.HOLYRICS_PULL_ENABLED === "true",
-    pullIntervalMs: process.env.HOLYRICS_PULL_INTERVAL_MS,
-    timeoutMs: process.env.HOLYRICS_TIMEOUT_MS,
-  });
-
-let holyricsConfig = buildHolyricsConfigFromEnv();
-
-let persistRuntimeConfigTimer;
+// A integracao com o Holyrics e configurada inteiramente pelo painel (ver
+// POST /holyrics/config) e persistida em runtime-config.json - nao ha mais
+// leitura de HOLYRICS_* no .env, que so gerava confusao (editar o .env nao
+// tinha efeito nenhum depois da primeira config salva pela interface, ja
+// que o valor persistido sempre tinha prioridade). `sanitizeHolyricsConfig`
+// ja fornece defaults sensatos para uma instalacao nova.
+let holyricsConfig = sanitizeHolyricsConfig({});
 
 const buildPersistedRuntimeConfig = () => ({
-  version: RUNTIME_CONFIG_VERSION,
   savedAt: new Date().toISOString(),
   lastHolyricsContentChannel,
   styles: {
@@ -136,106 +126,6 @@ const buildPersistedRuntimeConfig = () => ({
   holyricsConfig,
   presets,
 });
-
-const persistRuntimeConfigNow = async () => {
-  const payload = buildPersistedRuntimeConfig();
-  await fs.mkdir(path.dirname(runtimeConfigPath), { recursive: true });
-
-  // Guarda uma copia do arquivo anterior antes de sobrescrever, para que uma
-  // gravacao ruim (ou uma mudanca indesejada) tenha um estado recuperavel.
-  try {
-    await fs.copyFile(runtimeConfigPath, runtimeConfigBackupPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT") {
-      console.warn(`[runtime-config] Falha ao criar backup: ${error.message}`);
-    }
-  }
-
-  // Escreve em um arquivo temporario e so entao substitui o arquivo final -
-  // `rename` e atomico no mesmo filesystem, entao uma interrupcao a meio da
-  // escrita nunca deixa `runtime-config.json` truncado/corrompido.
-  await fs.writeFile(runtimeConfigTmpPath, JSON.stringify(payload, null, 2), "utf8");
-  await fs.rename(runtimeConfigTmpPath, runtimeConfigPath);
-};
-
-const schedulePersistRuntimeConfig = () => {
-  if (persistRuntimeConfigTimer) {
-    clearTimeout(persistRuntimeConfigTimer);
-  }
-
-  persistRuntimeConfigTimer = setTimeout(() => {
-    persistRuntimeConfigNow().catch((error) => {
-      console.warn(`[runtime-config] Falha ao salvar configuracao: ${error.message}`);
-    });
-  }, 180);
-};
-
-const isPlainObject = (value) =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value);
-
-const isValidRuntimeConfigShape = (parsed) =>
-  isPlainObject(parsed) && Number.isFinite(Number(parsed.version));
-
-// Hoje e um passthrough (so existe a versao 1), mas isola o ponto de
-// evolucao do formato: uma versao futura pode inspecionar `parsed.version`
-// aqui e adaptar campos antigos sem precisar reescrever o loader inteiro.
-const migrateRuntimeConfig = (parsed) => parsed;
-
-const readRuntimeConfigFile = async (filePath) => {
-  const raw = await fs.readFile(filePath, "utf8");
-  const parsed = JSON.parse(raw);
-
-  if (!isValidRuntimeConfigShape(parsed)) {
-    throw new Error("formato invalido (campo 'version' ausente ou invalido)");
-  }
-
-  return migrateRuntimeConfig(parsed);
-};
-
-const loadPersistedRuntimeConfig = async () => {
-  try {
-    const config = await readRuntimeConfigFile(runtimeConfigPath);
-    runtimeConfigStatus = { source: "file", warning: null };
-    return config;
-  } catch (mainError) {
-    const mainMissing = mainError?.code === "ENOENT";
-    if (!mainMissing) {
-      console.warn(
-        `[runtime-config] Configuracao principal invalida ou corrompida: ${mainError.message}`
-      );
-    }
-
-    try {
-      const backupConfig = await readRuntimeConfigFile(runtimeConfigBackupPath);
-      runtimeConfigStatus = {
-        source: "backup",
-        warning: mainMissing
-          ? null
-          : `Configuracao principal estava corrompida (${mainError.message}). Valores recuperados do backup mais recente.`,
-      };
-      console.info("[runtime-config] Configuracao recuperada do backup.");
-      return backupConfig;
-    } catch (backupError) {
-      const backupMissing = backupError?.code === "ENOENT";
-      const bothMissing = mainMissing && backupMissing;
-
-      runtimeConfigStatus = {
-        source: "defaults",
-        warning: bothMissing
-          ? null
-          : "Configuracao salva e backup estavam corrompidos ou inacessiveis - iniciando com valores padrao.",
-      };
-
-      if (!bothMissing) {
-        console.warn(
-          `[runtime-config] Backup tambem indisponivel ou invalido (${backupError.message}) - usando valores padrao.`
-        );
-      }
-
-      return null;
-    }
-  }
-};
 
 const applyPersistedRuntimeConfig = (persisted) => {
   if (!persisted || typeof persisted !== "object") {
@@ -510,7 +400,7 @@ const restartHolyricsPull = () => {
 const resetRuntimeConfigToDefaults = async () => {
   channelStates = createInitialChannelStates();
   layoutConfig = sanitizeLayoutConfig({});
-  holyricsConfig = buildHolyricsConfigFromEnv();
+  holyricsConfig = sanitizeHolyricsConfig({});
   lastHolyricsContentChannel = null;
 
   restartHolyricsPull();
@@ -519,10 +409,12 @@ const resetRuntimeConfigToDefaults = async () => {
     emitState(channel);
   }
 
-  await persistRuntimeConfigNow();
+  await runtimeConfigStore.saveNow(buildPersistedRuntimeConfig());
 };
 
-const persistedRuntimeConfig = await loadPersistedRuntimeConfig();
+const { config: persistedRuntimeConfig, status: loadedRuntimeConfigStatus } =
+  await runtimeConfigStore.load();
+runtimeConfigStatus = loadedRuntimeConfigStatus;
 if (persistedRuntimeConfig) {
   applyPersistedRuntimeConfig(persistedRuntimeConfig);
   console.info(`[runtime-config] Configuracao carregada (fonte: ${runtimeConfigStatus.source}).`);
@@ -553,7 +445,7 @@ io.on("connection", (socket) => {
     });
 
     if (payload?.estilo && results.some((item) => item.changed)) {
-      schedulePersistRuntimeConfig();
+      runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
     }
 
     if (typeof ack === "function") {
@@ -599,7 +491,7 @@ app.post("/letra", (req, res) => {
   });
 
   if (req.body?.estilo && results.some((item) => item.changed)) {
-    schedulePersistRuntimeConfig();
+    runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
   }
 
   res.json({
@@ -695,7 +587,7 @@ app.post("/holyrics/config", (req, res) => {
   });
 
   restartHolyricsPull();
-  schedulePersistRuntimeConfig();
+  runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
 
   res.json({
     ok: true,
@@ -735,7 +627,7 @@ app.post("/layout/config", (req, res) => {
     });
   }
 
-  schedulePersistRuntimeConfig();
+  runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
 
   res.json({
     ok: true,
@@ -763,7 +655,7 @@ app.get("/presets", (_req, res) => {
 app.post("/presets", (req, res) => {
   const preset = sanitizePreset({ name: req.body?.name, style: req.body?.style });
   presets = [...presets, preset];
-  schedulePersistRuntimeConfig();
+  runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
 
   res.json({ ok: true, preset });
 });
@@ -776,7 +668,7 @@ app.put("/presets/:id", (req, res) => {
 
   const updated = sanitizePreset(req.body || {}, presets[index]);
   presets = [...presets.slice(0, index), updated, ...presets.slice(index + 1)];
-  schedulePersistRuntimeConfig();
+  runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
 
   res.json({ ok: true, preset: updated });
 });
@@ -788,7 +680,7 @@ app.delete("/presets/:id", (req, res) => {
   }
 
   presets = presets.filter((item) => item.id !== req.params.id);
-  schedulePersistRuntimeConfig();
+  runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
 
   res.json({ ok: true });
 });
@@ -815,7 +707,7 @@ app.post("/presets/:id/apply", (req, res) => {
   });
 
   if (results.some((item) => item.changed)) {
-    schedulePersistRuntimeConfig();
+    runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
   }
 
   res.json({ ok: true, changed: results.some((item) => item.changed), channels });
@@ -844,7 +736,7 @@ app.post("/presets/import", (req, res) => {
   });
 
   if (imported.length > 0) {
-    schedulePersistRuntimeConfig();
+    runtimeConfigStore.schedulePersist(buildPersistedRuntimeConfig);
   }
 
   res.json({ ok: errors.length === 0, imported, errors });
@@ -889,6 +781,26 @@ app.post(
   })
 );
 
+// Varre a rede local procurando uma maquina respondendo como o Holyrics
+// (mesmo host/porta/path/token configurados), para o operador nao precisar
+// descobrir manualmente o IP da maquina do Holyrics (ex: rodando `ipconfig`
+// nela). Usa a config atualmente salva, a menos que o body traga overrides.
+app.post(
+  "/holyrics/discover",
+  asyncHandler(async (req, res) => {
+    const overrides = req.body || {};
+    const result = await discoverHolyricsHosts({
+      port: Number(overrides.port) || holyricsConfig.port,
+      path: overrides.path || holyricsConfig.path,
+      method: overrides.method || holyricsConfig.method,
+      token: overrides.token ?? holyricsConfig.token,
+      tokenHeader: overrides.tokenHeader || holyricsConfig.tokenHeader,
+    });
+
+    res.json({ ok: true, ...result });
+  })
+);
+
 // Qualquer rota nao encontrada volta como JSON (nao a pagina HTML padrao do
 // Express), para nao quebrar clientes que sempre esperam `response.json()`.
 app.use((req, res) => {
@@ -909,31 +821,6 @@ app.use((err, _req, res, _next) => {
 
 const port = Number(process.env.PORT) || 3001;
 const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
-
-const resolveServerUrls = (listenHost, listenPort) => {
-  const normalizedHost = String(listenHost || "")
-    .trim()
-    .toLowerCase();
-  const onAllInterfaces = normalizedHost === "0.0.0.0" || normalizedHost === "::";
-  const urls = new Set();
-
-  if (onAllInterfaces) {
-    urls.add(`http://localhost:${listenPort}`);
-
-    const interfaces = os.networkInterfaces();
-    for (const addresses of Object.values(interfaces)) {
-      for (const address of addresses || []) {
-        if (address.family === "IPv4" && !address.internal) {
-          urls.add(`http://${address.address}:${listenPort}`);
-        }
-      }
-    }
-  } else {
-    urls.add(`http://${listenHost}:${listenPort}`);
-  }
-
-  return [...urls];
-};
 
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {

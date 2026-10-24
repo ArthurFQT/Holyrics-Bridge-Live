@@ -80,7 +80,9 @@ export const getSafeChannel = (channel) => {
   return validChannels.has(normalized) ? normalized : CHANNELS.DEFAULT;
 };
 
-export const createInitialState = () => ({
+// Usado so por `createInitialChannelStates` abaixo - nao precisa ser
+// exportado, mais nenhum outro modulo cria um unico canal isolado.
+const createInitialState = () => ({
   texto: "",
   // Texto "cru", antes de qualquer transformacao de layout (ex: agrupamento
   // de linhas da musica). E a partir dele que o layout e recalculado quando
