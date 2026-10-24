@@ -46,7 +46,12 @@ npm run dev
 ## Estrutura
 
 - `server`: Express + Socket.IO (websocket-only)
-- `control-panel`: Painel React para texto e estilo
+  - `server/src/index.js`: rotas HTTP/Socket.IO e o estado em memoria dos canais
+  - `server/src/holyricsClient.js`: cliente/parsers da API do Holyrics (pull, extracao de texto/tipo/versiculo)
+  - `server/src/runtimeConfig.js`: persistencia em disco (load/save/backup/escrita atomica), generica, sem conhecer o formato dos dados do app
+  - `server/src/network.js`: IPs locais e a busca automatica do Holyrics na rede (`/holyrics/discover`)
+  - `server/src/state.js`: formato do estado de cada canal e sanitizacao de estilo/config
+- `control-panel`: Painel React para texto e estilo (componentes em `src/components`, utilitarios em `src/utils`, constantes em `src/constants`)
 - `server/public/display`: Pagina leve de exibicao com fundo transparente
 
 Para cenarios de instalacao com Holyrics/vMix/painel em maquinas diferentes,
@@ -87,6 +92,16 @@ No modo `gradient` voce pode definir:
 - alcance ate transparencia
 
 Existe tambem o botao `Preset Biblia (gradiente canto inferior esquerdo)`.
+
+### Fonte customizada via Google Fonts
+
+Para usar uma fonte que nao esta na lista padrao, cole a URL da aba
+"Embed" do [Google Fonts](https://fonts.google.com/) no campo "URL do
+Google Fonts" (algo como
+`https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single&display=swap`).
+O painel detecta o nome da fonte sozinho a partir da URL e preenche o
+campo de familia da fonte automaticamente - so edite esse campo manualmente
+se quiser trocar o nome ou o fallback.
 
 ## Quebra de linhas (musica)
 
@@ -191,10 +206,21 @@ Aceita `texto`, `text`, `lyric`, `current.texto`, `current.text` e usa `type` pa
 
 ### Configuracao da integracao Holyrics
 
+A integracao com o Holyrics (IP, porta, path, token, intervalo de pull) e
+configurada inteiramente pelo painel e persistida em
+`server/data/runtime-config.json` - nao existe mais nenhuma variavel
+`HOLYRICS_*` no `.env` (o `server/.env` cuida so de `HOST`/`PORT`/`PANEL_ORIGIN`,
+que precisam existir antes do servidor poder subir e servir o painel).
+
 - `GET /holyrics/config`
 - `POST /holyrics/config`
 - `POST /holyrics/pull-now` (forcar leitura imediata)
 - `GET /holyrics/diagnostics`
+- `POST /holyrics/discover`: varre a rede local procurando uma maquina
+  respondendo como o Holyrics (mesmo host/porta/path/token configurados) e
+  devolve os IPs encontrados - usado pelo botao "Procurar Holyrics na
+  rede" no painel, para nao precisar descobrir manualmente o IP da maquina
+  do Holyrics (ex: rodando `ipconfig` nela).
 
 ### Persistencia da configuracao
 

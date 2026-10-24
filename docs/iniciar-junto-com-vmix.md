@@ -36,10 +36,11 @@ https://github.com/ArthurFQT/Holyrics-Bridge-Live.git` funciona igual.
    npm install
    ```
 4. **Configurar o `.env` do backend**: copie `server\.env.example` para
-   `server\.env` e ajuste `HOLYRICS_HOST`/`HOLYRICS_PORT` para o IP/porta
-   do Holyrics (se o Holyrics estiver na mesma maquina do vMix, pode deixar
-   `127.0.0.1`). O `.env` do painel (`control-panel`) nao precisa de
-   nenhum ajuste - ele detecta o backend sozinho (ver
+   `server\.env` (os valores padrao servem na maioria dos casos). O IP/porta
+   do Holyrics se configuram depois, pelo painel (secao "Integracao
+   Holyrics", com um botao para procurar o Holyrics na rede
+   automaticamente), nao pelo `.env`. O `.env` do painel (`control-panel`)
+   tambem nao precisa de nenhum ajuste - ele detecta o backend sozinho (ver
    [Guia de cenarios reais](guia-cenarios-reais.md)).
 5. **Testar manualmente**: de duplo-clique em `scripts\windows\iniciar-bridge.bat`
    (dentro da copia do projeto **nessa maquina**) e confirme que abre uma

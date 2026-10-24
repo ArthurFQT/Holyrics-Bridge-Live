@@ -40,11 +40,12 @@ maquina, `localhost` ou `127.0.0.1` funciona normalmente.
 
 Holyrics, backend, painel e vMix na mesma maquina.
 
-1. Configure `server/.env` com `HOLYRICS_HOST=127.0.0.1` e a porta do
-   WebService Plugin do Holyrics.
-2. `npm run dev` na raiz (nao precisa mexer em `control-panel/.env`).
-3. No vMix, use os Browser Input com `http://localhost:3001/display/...`.
-4. Abra o painel em `http://localhost:5173`.
+1. `npm run dev` na raiz (nao precisa mexer em `control-panel/.env`).
+2. No vMix, use os Browser Input com `http://localhost:3001/display/...`.
+3. Abra o painel em `http://localhost:5173` e, na secao "Integracao
+   Holyrics", configure `IP/Host=127.0.0.1` e a porta do WebService Plugin
+   do Holyrics (ou use o botao "Procurar Holyrics na rede" para detectar
+   automaticamente).
 
 ## Cenario 2 - Holyrics em um PC, vMix em outro
 
@@ -54,11 +55,13 @@ transmissao.
 1. Descubra o IP do PC onde o **backend** vai rodar (ex: `192.168.0.10`).
 2. No PC do Holyrics, ative o WebService Plugin e anote a porta usada
    (padrao comum: `4747` ou `8080`).
-3. No PC do backend/vMix, configure `server/.env`:
-   - `HOLYRICS_HOST=<IP do PC do Holyrics>`
-   - `HOLYRICS_PORT=<porta do WebService Plugin>`
-4. Rode o backend nesse PC (`npm run dev:server` ou `npm start` apos
+3. Rode o backend no PC do vMix (`npm run dev:server` ou `npm start` apos
    `npm run build`).
+4. No painel (secao "Integracao Holyrics"), configure o IP do PC do
+   Holyrics e a porta do WebService Plugin - ou clique em "Procurar
+   Holyrics na rede" para o painel encontrar o IP sozinho, sem precisar
+   descobrir manualmente. A configuracao e salva pelo backend e nao depende
+   de `.env`.
 5. No vMix (mesmo PC), use `http://localhost:3001/display/...` nos Browser
    Input (mesma maquina que o backend).
 6. Acesse o painel de outro dispositivo na rede (ver Cenario 3) ou
